@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#1A3057" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="OM Gesprekken" />
+  <title>OM Gesprekken</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: #F6F2EA; color: #1C1C1C; -webkit-font-smoothing: antialiased; }
+    #root { min-height: 100vh; }
+    textarea, input, button { font-family: 'Inter', system-ui, sans-serif; }
+    textarea:focus, input:focus { outline: none; border-color: #1A3057 !important; box-shadow: 0 0 0 3px rgba(26,48,87,0.12) !important; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeIn 0.2s ease; }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #D5CFBF; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // ─── COLORS ───────────────────────────────────────────────────────────────
+    const C = {
+      navy:'#1A3057', navyDk:'#0F1E38', navyLt:'#2A4A7F',
+      cream:'#F6F2EA', creamDk:'#EDE8DF',
+      border:'#D5CFBF', gold:'#A67C00',
+      text:'#1C1C1C', mid:'#555', light:'#888',
+      green:'#2D6A4F', orange:'#B85C00', red:'#8B1A1A',
+      white:'#FFFFFF',
+    };
+
+    // ─── STORAGE (localStorage) ───────────────────────────────────────────────
+    const store = {
+      loadGesprekken: () => { try { return JSON.parse(localStorage.getItem('om-gesprekken') || '[]'); } catch { return []; } },
+      saveGesprekken: (d) => { try { localStorage.setItem('om-gesprekken', JSON.stringify(d)); } catch {} },
+      getApiKey: () => localStorage.getItem('om-api-key') || '',
+      setApiKey: (k) => localStorage.setItem('om-api-key', k),
+    };
+
+    // ─── CLAUDE API ───────────────────────────────────────────────────────────
+    async function claude(messages, system, apiKey) {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, system, messages }),
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error.message);
+      return d.content?.map(b => b.text || '').join('\n') || '';
+    }
+
+    // ─── TEMPLATES ────────────────────────────────────────────────────────────
+    const TPL_A = [
+      { id:'p', title:'01 · Persoonlijk', hint:'Begin zelf — deel iets persoonlijks voordat je het vraagt', fields:[
+        { id:'pers_ach', label:'Achtergrond & loopbaan', rows:3 },
+        { id:'pers_stijl', label:'Werkstijl & energie — wat past, wat absoluut niet', rows:3 },
+      ]},
+      { id:'w', title:'02 · Werk en rol', hint:'Let op rolduidelijkheid: weet iemand wat er van hem/haar verwacht wordt?', fields:[
+        { id:'werk_uitleg', label:'Hoe legt iemand zijn werk uit aan iemand buiten het werk', rows:3 },
+        { id:'werk_sterk', label:'Sterktes — wat zou de afdeling missen', rows:2 },
+        { id:'werk_energ', label:'Energiegevers versus energievreters', rows:3 },
+      ]},
+      { id:'s', title:'03 · Samenwerking', hint:'Silovorming en frictiegebieden zitten hier tussen de regels', fields:[
+        { id:'sw_wie', label:'Met wie samengewerkt, hoe loopt dat', rows:3 },
+        { id:'sw_loopt', label:'Wat gaat vanzelf — wat kost elke keer moeite', rows:3 },
+        { id:'sw_zoekt', label:'Wie zoekt wie op', rows:2 },
+      ]},
+      { id:'b', title:'04 · Buiten en behoeften', hint:'Reactief of pro-actief patroon? Wie stuurt de agenda?', fields:[
+        { id:'buit_sh', label:'Stakeholders — weten die wat hij/zij voor ze kan doen', rows:3 },
+        { id:'buit_waarde', label:'Wanneer is er echt toegevoegde waarde — en wanneer niet', rows:3 },
+      ]},
+      { id:'a', title:'05 · De afdeling als geheel', hint:'De goudvraag aan het einde is het meest waardevol', fields:[
+        { id:'afd_goed', label:'Wat gaat goed / wat koesteren', rows:2 },
+        { id:'afd_anders', label:'Wat anders zou moeten', rows:3 },
+        { id:'afd_nodig', label:'Wat heeft hij/zij nodig om werk echt goed te doen', rows:2 },
+        { id:'afd_goud', label:'Goudvraag — wat ga ik onderschatten of niet meteen snappen', rows:3 },
+      ]},
+    ];
+
+    const TPL_B = [
+      { id:'c', title:'01 · Hun werk en context', hint:'Niet over jouw afdeling beginnen — eerst hun wereld begrijpen', fields:[
+        { id:'b_druk', label:'Grootste uitdagingen op dit moment — waar zit de druk', rows:3 },
+        { id:'b_jaar', label:'Wat moet er over een jaar beter zijn dan nu', rows:3 },
+      ]},
+      { id:'r', title:'02 · Raakvlakken met jouw afdeling', hint:'Latente behoeften zitten zelden in wat mensen spontaan noemen — doorvragen', fields:[
+        { id:'b_gebruik', label:'Waar maken ze gebruik van de afdeling — of zouden ze dat willen', rows:3 },
+        { id:'b_stokt', label:'Wat gaat goed — wat stokt', rows:3 },
+        { id:'b_latent', label:'Latente behoeften — wat willen ze maar vragen ze niet om, waarom niet', rows:4 },
+        { id:'b_gemist', label:'Wat hebben ze weleens gezocht en niet gevonden', rows:3 },
+      ]},
+      { id:'pe', title:'03 · Perceptie van de afdeling', hint:'Niet aanvechten of verdedigen — gewoon opnemen', fields:[
+        { id:'b_omschr', label:'Hoe omschrijven ze de afdeling aan een collega die er weinig van weet', rows:3 },
+        { id:'b_verwacht', label:'Wat verwachten ze — en wat juist niet', rows:3 },
+        { id:'b_verander', label:'Als ze één ding zouden veranderen aan hoe de afdeling werkt — wat dan', rows:3 },
+      ]},
+    ];
+
+    const DIAG_A = [
+      { id:'diag_rol',   label:'Rolduidelijkheid',    opts:['Helder','Vaag','Onduidelijk'],               colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_ori',   label:'Oriëntatie',           opts:['Buitengericht','Gemengd','Binnengericht'],   colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_eigen', label:'Eigenaarschap',        opts:['Sterk','Wisselend','Afwachtend'],            colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_inv',   label:'Informele invloed',    opts:['Ja','Deels','Nee'],                          colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_toon',  label:'Toon gesprek',         opts:['Positief','Neutraal','Kritisch','Gesloten'], colors:['#2D6A4F','#666','#B85C00','#8B1A1A'] },
+    ];
+
+    const DIAG_B = [
+      { id:'diag_kent',  label:'Kent afdeling goed?',           opts:['Ja','Gedeeltelijk','Nauwelijks'], colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_react', label:'Afdeling reactief of pro-actief?', opts:['Pro-actief','Wisselend','Reactief'], colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_toon',  label:'Toon gesprek',                  opts:['Positief','Neutraal','Kritisch'],  colors:['#2D6A4F','#666','#8B1A1A'] },
+    ];
+
+    const uid = () => Math.random().toString(36).slice(2,10);
+
+    function gesprekToText(g) {
+      const sections = g.type === 'medewerker' ? TPL_A : TPL_B;
+      const diags    = g.type === 'medewerker' ? DIAG_A : DIAG_B;
+      let t = `=== ${g.type.toUpperCase()}: ${g.naam}${g.functie ? ` (${g.functie})` : ''}${g.cluster ? ` · ${g.cluster}` : ''} · ${g.datum} ===\n\n`;
+      sections.forEach(s => {
+        const body = s.fields.filter(f => g[f.id]?.trim()).map(f => `  ${f.label}:\n  ${g[f.id]}`).join('\n\n');
+        if (body) t += `${s.title}\n${body}\n\n`;
+      });
+      const diag = diags.filter(f => g[f.id]).map(f => `${f.label}: ${g[f.id]}`).join('  |  ');
+      if (diag) t += `Diagnose: ${diag}\n`;
+      if (g.frustratie) t += `Frustratie: ${g.frustratie}\n`;
+      if (g.kernbev) t += `Kernbevindingen: ${g.kernbev}\n`;
+      return t;
+    }
+
+    // ─── STYLES ───────────────────────────────────────────────────────────────
+    const S = {
+      app: { minHeight:'100vh', background:C.cream },
+      hdr: { background:C.navy, color:C.white, padding:'0 20px', position:'sticky', top:0, zIndex:100, boxShadow:'0 2px 12px rgba(0,0,0,0.2)' },
+      hdrIn: { maxWidth:900, margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'space-between', height:56 },
+      title: { fontFamily:"'Lora', Georgia, serif", fontSize:18, fontWeight:700, letterSpacing:'-0.3px' },
+      sub: { fontSize:11, color:'rgba(255,255,255,0.5)', marginTop:1 },
+      nav: { display:'flex', gap:4 },
+      navBtn: (a) => ({ padding:'8px 14px', borderRadius:6, border:'none', cursor:'pointer', fontSize:13, fontWeight:500, background: a ? 'rgba(255,255,255,0.15)' : 'transparent', color: a ? C.white : 'rgba(255,255,255,0.6)', transition:'all 0.15s' }),
+      main: { maxWidth:900, margin:'0 auto', padding:'24px 20px 80px' },
+      card: { background:C.white, borderRadius:10, border:`1px solid ${C.border}`, padding:20, marginBottom:12, cursor:'pointer', transition:'box-shadow 0.15s', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' },
+      secTitle: { fontFamily:"'Lora', Georgia, serif", fontSize:22, fontWeight:700, color:C.navy, marginBottom:6 },
+      label: { fontSize:13, fontWeight:600, color:C.navy, marginBottom:5, display:'block' },
+      hint: { fontSize:12, color:C.orange, marginBottom:8, fontStyle:'italic' },
+      ta: { width:'100%', border:`1px solid ${C.border}`, borderRadius:7, padding:'10px 12px', fontSize:14, color:C.text, background:C.white, resize:'vertical', lineHeight:1.6, transition:'border-color 0.15s, box-shadow 0.15s' },
+      inp: { width:'100%', border:`1px solid ${C.border}`, borderRadius:7, padding:'10px 12px', fontSize:14, color:C.text, background:C.white, transition:'border-color 0.15s, box-shadow 0.15s' },
+      btnP: { background:C.navy, color:C.white, border:'none', borderRadius:8, padding:'10px 22px', fontSize:14, fontWeight:600, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6, transition:'opacity 0.15s' },
+      btnS: { background:'transparent', color:C.navy, border:`1.5px solid ${C.navy}`, borderRadius:8, padding:'9px 20px', fontSize:14, fontWeight:600, cursor:'pointer', transition:'all 0.15s' },
+      pill: (col) => ({ display:'inline-block', padding:'2px 10px', borderRadius:20, fontSize:11, fontWeight:600, background:col+'22', color:col, border:`1px solid ${col}44`, marginRight:4 }),
+      secHdr: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 18px', background:C.navy, borderRadius:8, cursor:'pointer', userSelect:'none', marginBottom:0 },
+      secHdrTxt: { fontFamily:"'Lora', Georgia, serif", fontSize:15, fontWeight:700, color:C.white },
+      diagRow: { display:'flex', alignItems:'flex-start', gap:16, padding:'12px 0', borderBottom:`1px solid ${C.creamDk}` },
+      diagLbl: { fontSize:13, fontWeight:600, color:C.navy, width:150, flexShrink:0, paddingTop:6 },
+      diagOpts: { display:'flex', flexWrap:'wrap', gap:6 },
+      optBtn: (sel, col) => ({ padding:'7px 14px', borderRadius:20, border:`1.5px solid ${sel ? col : C.border}`, background: sel ? col+'18' : C.white, color: sel ? col : C.mid, fontSize:13, fontWeight: sel ? 600 : 400, cursor:'pointer', transition:'all 0.1s' }),
+      mcell: (col) => ({ width:22, height:22, borderRadius:4, background:col, display:'flex', alignItems:'center', justifyContent:'center', fontSize:9, fontWeight:700, color:C.white, flexShrink:0 }),
+      aiBox: { background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:24, whiteSpace:'pre-wrap', fontSize:14, lineHeight:1.8, color:C.text },
+      empty: { textAlign:'center', padding:'60px 20px', color:C.light },
+    };
+
+    // ─── SMALL COMPONENTS ─────────────────────────────────────────────────────
+    function Spinner() {
+      return <span style={{ display:'inline-block', width:15, height:15, border:'2px solid rgba(255,255,255,0.35)', borderTopColor:C.white, borderRadius:'50%', animation:'spin 0.7s linear infinite' }} />;
+    }
+
+    function TypeBadge({ type }) {
+      return <span style={S.pill(type === 'medewerker' ? C.navyLt : C.gold)}>{type === 'medewerker' ? 'Medewerker' : 'Stakeholder'}</span>;
+    }
+
+    function Accordion({ title, hint, open, onToggle, children }) {
+      return (
+        <div style={{ marginBottom:16 }}>
+          <div style={S.secHdr} onClick={onToggle}>
+            <span style={S.secHdrTxt}>{title}</span>
+            <span style={{ color:'rgba(255,255,255,0.7)', fontSize:18 }}>{open ? '−' : '+'}</span>
+          </div>
+          {open && (
+            <div style={{ padding:'20px 0 4px', display:'flex', flexDirection:'column', gap:16 }} className="fade-in">
+              {hint && <div style={S.hint}>💡 {hint}</div>}
+              {children}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── SETUP SCREEN ─────────────────────────────────────────────────────────
+    function SetupView({ onSave }) {
+      const [key, setKey] = useState('');
+      return (
+        <div style={{ minHeight:'100vh', background:C.navy, display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
+          <div style={{ background:C.white, borderRadius:16, padding:40, maxWidth:440, width:'100%', boxShadow:'0 20px 60px rgba(0,0,0,0.3)' }}>
+            <div style={{ fontFamily:"'Lora', Georgia, serif", fontSize:26, fontWeight:700, color:C.navy, marginBottom:8 }}>OM Gesprekken</div>
+            <div style={{ fontSize:14, color:C.mid, marginBottom:28, lineHeight:1.6 }}>
+              Om patronenanalyse en bevindingsnotities te genereren heb je een Anthropic API-sleutel nodig. Je sleutel wordt lokaal opgeslagen en nooit gedeeld.
+            </div>
+            <label style={S.label}>Anthropic API-sleutel</label>
+            <input style={{ ...S.inp, marginBottom:8, fontFamily:'monospace', fontSize:13 }}
+              type="password" placeholder="sk-ant-..." value={key} onChange={e => setKey(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && key.startsWith('sk-') && onSave(key)} />
+            <div style={{ fontSize:12, color:C.light, marginBottom:24 }}>
+              Haal je sleutel op via <a href="https://console.anthropic.com" target="_blank" style={{ color:C.navyLt }}>console.anthropic.com</a>
+            </div>
+            <button style={{ ...S.btnP, width:'100%', justifyContent:'center' }}
+              onClick={() => key.startsWith('sk-') && onSave(key)} disabled={!key.startsWith('sk-')}>
+              Opslaan en starten
+            </button>
+            <div style={{ marginTop:16, fontSize:12, color:C.light, textAlign:'center' }}>
+              De app werkt ook zonder sleutel — alleen AI-functies zijn dan uitgeschakeld.
+            </div>
+            <button style={{ ...S.btnS, width:'100%', justifyContent:'center', marginTop:8, fontSize:13 }}
+              onClick={() => onSave('')}>Verder zonder sleutel</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── GESPREKKEN LIST ──────────────────────────────────────────────────────
+    function GesprekkenView({ gesprekken, onNew, onEdit, onDelete }) {
+      const [search, setSearch] = useState('');
+      const filtered = gesprekken.filter(g =>
+        !search || [g.naam, g.functie, g.cluster].some(v => v?.toLowerCase().includes(search.toLowerCase()))
+      );
+      return (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+            <div>
+              <div style={S.secTitle}>Gesprekken</div>
+              <div style={{ fontSize:13, color:C.mid }}>
+                {gesprekken.length} gesprekken · {gesprekken.filter(g => g.type==='medewerker').length} medewerkers · {gesprekken.filter(g => g.type==='stakeholder').length} stakeholders
+              </div>
+            </div>
+            <button style={S.btnP} onClick={onNew}>+ Nieuw gesprek</button>
+          </div>
+          {gesprekken.length > 3 && (
+            <input style={{ ...S.inp, marginBottom:16 }} placeholder="Zoeken…" value={search} onChange={e => setSearch(e.target.value)} />
+          )}
+          {filtered.length === 0 && (
+            <div style={S.empty}>
+              <div style={{ fontSize:40, marginBottom:12 }}>📋</div>
+              <div style={{ fontSize:16, fontWeight:600, marginBottom:6 }}>Nog geen gesprekken</div>
+              <div style={{ fontSize:14 }}>Voeg je eerste kennismakingsgesprek toe.</div>
+            </div>
+          )}
+          {filtered.map(g => {
+            const diags = g.type === 'medewerker' ? DIAG_A : DIAG_B;
+            return (
+              <div key={g.id} onClick={() => onEdit(g.id)}
+                style={{ ...S.card, borderLeft:`3px solid ${g.type==='medewerker' ? C.navyLt : C.gold}` }}
+                onMouseEnter={e => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'}
+                onMouseLeave={e => e.currentTarget.style.boxShadow='0 1px 4px rgba(0,0,0,0.04)'}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:4 }}>
+                      <span style={{ fontFamily:"'Lora', serif", fontSize:16, fontWeight:700 }}>{g.naam || '(geen naam)'}</span>
+                      <TypeBadge type={g.type} />
+                    </div>
+                    <div style={{ fontSize:13, color:C.mid, marginBottom:8 }}>
+                      {[g.functie, g.cluster, g.datum].filter(Boolean).join(' · ')}
+                    </div>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
+                      {diags.filter(f => g[f.id]).map(f => {
+                        const idx = f.opts.indexOf(g[f.id]);
+                        return <span key={f.id} style={S.pill(f.colors[idx] || C.mid)}>{g[f.id]}</span>;
+                      })}
+                    </div>
+                  </div>
+                  <button onClick={e => { e.stopPropagation(); if(window.confirm('Gesprek verwijderen?')) onDelete(g.id); }}
+                    style={{ background:'none', border:'none', cursor:'pointer', color:C.light, fontSize:20, padding:'0 4px', lineHeight:1 }}>×</button>
+                </div>
+                {g.kernbev && (
+                  <div style={{ fontSize:13, color:C.mid, marginTop:8, paddingTop:8, borderTop:`1px solid ${C.creamDk}`, fontStyle:'italic' }}>
+                    "{g.kernbev.slice(0,120)}{g.kernbev.length>120?'…':''}"
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ─── FORM ─────────────────────────────────────────────────────────────────
+    function FormView({ gesprek, onSave, onCancel }) {
+      const [data, setData] = useState(gesprek || { type:'medewerker', naam:'', functie:'', cluster:'', datum:new Date().toISOString().slice(0,10) });
+      const [open, setOpen] = useState({ p:true });
+      const set = (k, v) => setData(d => ({ ...d, [k]:v }));
+      const toggle = id => setOpen(o => ({ ...o, [id]:!o[id] }));
+      const sections = data.type === 'medewerker' ? TPL_A : TPL_B;
+      const diagFields = data.type === 'medewerker' ? DIAG_A : DIAG_B;
+
+      return (
+        <div className="fade-in">
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
+            <div style={S.secTitle}>{gesprek?.id ? 'Gesprek bewerken' : 'Nieuw gesprek'}</div>
+            <button style={S.btnS} onClick={onCancel}>← Terug</button>
+          </div>
+
+          {/* Basisgegevens */}
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20, marginBottom:16 }}>
+            <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:16 }}>Basisgegevens</div>
+            <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+              {['medewerker','stakeholder'].map(t => (
+                <button key={t} onClick={() => set('type',t)}
+                  style={{ flex:1, padding:'10px', borderRadius:8, border:`2px solid ${data.type===t ? C.navy : C.border}`, background: data.type===t ? C.navy : C.white, color: data.type===t ? C.white : C.mid, fontWeight:600, fontSize:13, cursor:'pointer', transition:'all 0.15s' }}>
+                  {t === 'medewerker' ? '👤 Medewerker' : '🤝 Stakeholder'}
+                </button>
+              ))}
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              {[['naam','Naam *'],['functie','Functie / rol'],['cluster','Cluster / afdeling'],['datum','Datum']].map(([k,l]) => (
+                <div key={k} style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                  <label style={S.label}>{l}</label>
+                  <input style={S.inp} type={k==='datum'?'date':'text'} value={data[k]||''} onChange={e => set(k,e.target.value)} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {sections.map(sec => (
+            <Accordion key={sec.id} title={sec.title} hint={sec.hint} open={!!open[sec.id]} onToggle={() => toggle(sec.id)}>
+              {sec.fields.map(f => (
+                <div key={f.id} style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                  <label style={S.label}>{f.label}</label>
+                  <textarea style={S.ta} rows={f.rows} value={data[f.id]||''} onChange={e => set(f.id,e.target.value)} />
+                </div>
+              ))}
+            </Accordion>
+          ))}
+
+          <Accordion title="Diagnose na gesprek" open={!!open.diag} onToggle={() => toggle('diag')}>
+            {diagFields.map(f => (
+              <div key={f.id} style={S.diagRow}>
+                <div style={S.diagLbl}>{f.label}</div>
+                <div style={S.diagOpts}>
+                  {f.opts.map((opt,i) => (
+                    <button key={opt} onClick={() => set(f.id, data[f.id]===opt ? '' : opt)}
+                      style={S.optBtn(data[f.id]===opt, f.colors[i])}>{opt}</button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div style={{ ...S.diagRow, borderBottom:'none' }}>
+              <div style={S.diagLbl}>Frustratie over</div>
+              <div style={{ flex:1 }}><input style={S.inp} value={data.frustratie||''} onChange={e => set('frustratie',e.target.value)} /></div>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              <label style={S.label}>Kernbevindingen</label>
+              <textarea style={S.ta} rows={3} value={data.kernbev||''} onChange={e => set('kernbev',e.target.value)} />
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              <label style={S.label}>Follow-up / actiepunten</label>
+              <textarea style={S.ta} rows={2} value={data.followup||''} onChange={e => set('followup',e.target.value)} />
+            </div>
+          </Accordion>
+
+          <div style={{ display:'flex', gap:10, marginTop:8 }}>
+            <button style={S.btnP} onClick={() => onSave(data)}>Opslaan</button>
+            <button style={S.btnS} onClick={onCancel}>Annuleren</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── PATRONEN ─────────────────────────────────────────────────────────────
+    const MCOLS_A = [
+      { key:'diag_rol',   label:'Rol',  field:DIAG_A[0] },
+      { key:'diag_ori',   label:'Ori.', field:DIAG_A[1] },
+      { key:'diag_eigen', label:'Eig.', field:DIAG_A[2] },
+      { key:'diag_toon',  label:'Toon', field:DIAG_A[4] },
+    ];
+    const MCOLS_B = [
+      { key:'diag_kent',  label:'Kent',  field:DIAG_B[0] },
+      { key:'diag_react', label:'Reac.', field:DIAG_B[1] },
+      { key:'diag_toon',  label:'Toon',  field:DIAG_B[2] },
+    ];
+
+    function PatronenView({ gesprekken, apiKey }) {
+      const [aiText, setAiText] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [tab, setTab] = useState('matrix');
+      const [err, setErr] = useState('');
+
+      const medewerkers  = gesprekken.filter(g => g.type==='medewerker');
+      const stakeholders = gesprekken.filter(g => g.type==='stakeholder');
+
+      const getColor = (g, key, field) => {
+        const val = g[key]; if (!val || !field) return C.creamDk;
+        const idx = field.opts.indexOf(val);
+        return idx >= 0 ? field.colors[idx] : C.border;
+      };
+
+      const analyze = async () => {
+        if (!apiKey) { setErr('Geen API-sleutel — voeg die toe via de instellingen.'); return; }
+        setLoading(true); setTab('ai'); setErr('');
+        try {
+          const text = gesprekken.map(gesprekToText).join('\n\n');
+          const result = await claude(
+            [{ role:'user', content:`Hier zijn de gespreksnotities:\n\n${text}\n\nAnalyseer de patronen. Gebruik deze structuur:\n\n**Wat mensen spontaan noemen**\n\n**Wat mensen nooit noemen**\n\n**Waar zit frustratie**\n\n**Waar zit energie**\n\n**Verschil medewerkers versus stakeholders**\n\n**4-6 spanningsvelden** (formuleer als: "Er is spanning tussen X en Y doordat Z")\n\nVerwijs naar concrete inhoud uit de notities. Analytisch, direct, geen opsmuk.` }],
+            'Je analyseert gesprekken voor een nieuw afdelingshoofd bij OM Parket Den Haag. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal.',
+            apiKey
+          );
+          setAiText(result);
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      if (gesprekken.length === 0) return (
+        <div style={S.empty}><div style={{ fontSize:40, marginBottom:12 }}>📊</div><div style={{ fontSize:16, fontWeight:600 }}>Nog geen gesprekken om te analyseren</div></div>
+      );
+
+      const MatrixTable = ({ rows, cols }) => (
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ borderCollapse:'separate', borderSpacing:'4px', width:'100%' }}>
+            <thead><tr>
+              <th style={{ textAlign:'left', fontSize:12, color:C.mid, fontWeight:600, paddingBottom:6, minWidth:110 }}>Naam</th>
+              {cols.map(c => <th key={c.key} style={{ fontSize:11, color:C.mid, fontWeight:600, paddingBottom:6, textAlign:'center', minWidth:32 }}>{c.label}</th>)}
+              <th style={{ textAlign:'left', fontSize:12, color:C.mid, fontWeight:600, paddingBottom:6, minWidth:150 }}>Kernbevinding</th>
+            </tr></thead>
+            <tbody>{rows.map(g => (
+              <tr key={g.id}>
+                <td style={{ fontSize:13, fontWeight:600, paddingRight:12, paddingBottom:6, whiteSpace:'nowrap' }}>{g.naam}</td>
+                {cols.map(c => (
+                  <td key={c.key} style={{ textAlign:'center', paddingBottom:6 }}>
+                    <div title={g[c.key]||'–'} style={{ ...S.mcell(getColor(g,c.key,c.field)), margin:'0 auto' }}>
+                      {g[c.key] ? g[c.key][0] : '·'}
+                    </div>
+                  </td>
+                ))}
+                <td style={{ fontSize:12, color:C.mid, paddingBottom:6, maxWidth:220, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {g.kernbev?.slice(0,80)||'–'}
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      );
+
+      return (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+            <div style={S.secTitle}>Patronen</div>
+            <button style={S.btnP} onClick={analyze} disabled={loading}>
+              {loading ? <><Spinner /> Analyseren…</> : '🔍 Analyseer patronen'}
+            </button>
+          </div>
+          {err && <div style={{ background:'#fff0f0', border:'1px solid #f5c2c2', borderRadius:8, padding:'10px 14px', fontSize:13, color:C.red, marginBottom:16 }}>{err}</div>}
+          <div style={{ display:'flex', gap:8, marginBottom:20 }}>
+            {['matrix','ai'].map(t => (
+              <button key={t} onClick={() => setTab(t)}
+                style={{ ...S.btnS, background: tab===t ? C.navy : 'transparent', color: tab===t ? C.white : C.navy }}>
+                {t === 'matrix' ? '📋 Visuele matrix' : '🤖 AI-analyse'}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'matrix' && (
+            <div className="fade-in">
+              {medewerkers.length > 0 && (
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20, marginBottom:16 }}>
+                  <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:14 }}>Medewerkers ({medewerkers.length})</div>
+                  <MatrixTable rows={medewerkers} cols={MCOLS_A} />
+                  <div style={{ display:'flex', gap:16, marginTop:12, flexWrap:'wrap' }}>
+                    {MCOLS_A.map(c => (
+                      <div key={c.key} style={{ fontSize:11, color:C.mid }}>
+                        <strong>{c.label}</strong>:{c.field.opts.map((opt,i) => (
+                          <span key={opt} style={{ marginLeft:4 }}>
+                            <span style={{ display:'inline-block', width:10, height:10, borderRadius:2, background:c.field.colors[i], marginRight:2, verticalAlign:'middle' }}/>
+                            {opt}
+                          </span>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {stakeholders.length > 0 && (
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20 }}>
+                  <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:14 }}>Stakeholders ({stakeholders.length})</div>
+                  <MatrixTable rows={stakeholders} cols={MCOLS_B} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'ai' && (
+            <div className="fade-in">
+              {loading && <div style={{ textAlign:'center', padding:40, color:C.mid, fontSize:14 }}>Patronen worden geanalyseerd…</div>}
+              {!loading && aiText && <div style={S.aiBox}>{aiText}</div>}
+              {!loading && !aiText && <div style={S.empty}><div style={{ fontSize:14 }}>Klik op "Analyseer patronen" om te starten.</div></div>}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── NOTITIE ──────────────────────────────────────────────────────────────
+    function NotitieView({ gesprekken, apiKey }) {
+      const [notitie, setNotitie] = useState('');
+      const [history, setHistory] = useState([]);
+      const [input, setInput] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [err, setErr] = useState('');
+
+      const SYS = 'Je schrijft een bevindingsnotitie voor een nieuw afdelingshoofd bij OM Parket Den Haag. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal, geen overbodige opsmuk. Maximaal 1 A4.';
+
+      const generate = async () => {
+        if (!apiKey) { setErr('Geen API-sleutel — voeg die toe via de instellingen.'); return; }
+        setLoading(true); setErr('');
+        const text = gesprekken.map(gesprekToText).join('\n\n');
+        const prompt = `Schrijf een bevindingsnotitie op basis van deze kennismakingsgesprekken:\n\n${text}\n\nStructuur:\n\n**Wat gaat goed** (2-3 concrete patronen)\n\n**Spanningsvelden** (4-6 specifieke fricties, geformuleerd als spanning niet als oordeel)\n\n**Wat externe stakeholders zeggen** (alleen als er stakeholdergesprekken zijn)\n\n**Conclusie en richting** (3-5 zinnen, geen oplossingen, alleen bevindingen)\n\nGeen oplossingen. Alleen bevindingen. Directe taal.`;
+        try {
+          const msgs = [{ role:'user', content:prompt }];
+          const result = await claude(msgs, SYS, apiKey);
+          setNotitie(result);
+          setHistory([...msgs, { role:'assistant', content:result }]);
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      const refine = async () => {
+        if (!input.trim() || !notitie || !apiKey) return;
+        setLoading(true);
+        const newH = [...history, { role:'user', content:input }];
+        try {
+          const result = await claude(newH, SYS, apiKey);
+          setNotitie(result);
+          setHistory([...newH, { role:'assistant', content:result }]);
+          setInput('');
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      if (gesprekken.length === 0) return (
+        <div style={S.empty}><div style={{ fontSize:40, marginBottom:12 }}>📝</div><div style={{ fontSize:16, fontWeight:600 }}>Nog geen gesprekken</div></div>
+      );
+
+      return (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+            <div>
+              <div style={S.secTitle}>Bevindingsnotitie</div>
+              <div style={{ fontSize:13, color:C.mid }}>Op basis van {gesprekken.length} gesprekken · max 1 A4</div>
+            </div>
+            <button style={S.btnP} onClick={generate} disabled={loading}>
+              {loading ? <><Spinner /> Schrijven…</> : notitie ? '↻ Regenereer' : 'Genereer notitie'}
+            </button>
+          </div>
+
+          {err && <div style={{ background:'#fff0f0', border:'1px solid #f5c2c2', borderRadius:8, padding:'10px 14px', fontSize:13, color:C.red, marginBottom:16 }}>{err}</div>}
+
+          {!notitie && !loading && (
+            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:40, textAlign:'center', color:C.mid }}>
+              <div style={{ fontSize:36, marginBottom:12 }}>✍️</div>
+              <div style={{ fontSize:14 }}>Klik op "Genereer notitie" om een conceptbevindingsnotitie te schrijven op basis van alle gesprekken.</div>
+            </div>
+          )}
+
+          {loading && <div style={{ textAlign:'center', padding:40, color:C.mid, fontSize:14 }}>Notitie wordt geschreven…</div>}
+
+          {notitie && !loading && (
+            <div className="fade-in">
+              <div style={S.aiBox}>{notitie}</div>
+
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20, marginTop:16 }}>
+                <div style={{ fontFamily:"'Lora', serif", fontSize:14, fontWeight:700, color:C.navy, marginBottom:12 }}>Aanpassing of aanvulling geven</div>
+                {history.filter(m => m.role==='user').slice(1).map((m,i) => (
+                  <div key={i} style={{ fontSize:12, color:C.mid, padding:'6px 10px', background:C.creamDk, borderRadius:6, marginBottom:6 }}>↳ {m.content}</div>
+                ))}
+                <div style={{ display:'flex', gap:10 }}>
+                  <input style={{ ...S.inp, flex:1 }}
+                    placeholder="Bijv: 'Maak de spanningsvelden concreter' of 'Voeg iets toe over communicatie'"
+                    value={input} onChange={e => setInput(e.target.value)}
+                    onKeyDown={e => e.key==='Enter' && !e.shiftKey && refine()} />
+                  <button style={S.btnP} onClick={refine} disabled={loading || !input.trim()}>
+                    {loading ? <Spinner /> : 'Pas aan'}
+                  </button>
+                </div>
+                <div style={{ fontSize:12, color:C.light, marginTop:8 }}>Je kunt meerdere aanpassingen doen — Claude houdt de context bij.</div>
+              </div>
+
+              <div style={{ marginTop:16, display:'flex', gap:8 }}>
+                <button style={S.btnS} onClick={() => navigator.clipboard?.writeText(notitie)}>📋 Kopieer tekst</button>
+                <button style={{ ...S.btnS, color:C.light, borderColor:C.border }}
+                  onClick={() => { setNotitie(''); setHistory([]); }}>Wis notitie</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── INSTELLINGEN ─────────────────────────────────────────────────────────
+    function InstellingenView({ apiKey, onSaveKey, gesprekken }) {
+      const [key, setKey] = useState(apiKey);
+      const [saved, setSaved] = useState(false);
+      const save = () => { onSaveKey(key); setSaved(true); setTimeout(() => setSaved(false), 2000); };
+      return (
+        <div>
+          <div style={S.secTitle}>Instellingen</div>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginTop:20 }}>
+            <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:16 }}>API-sleutel</div>
+            <label style={S.label}>Anthropic API-sleutel</label>
+            <input style={{ ...S.inp, fontFamily:'monospace', fontSize:13, marginBottom:8 }}
+              type="password" placeholder="sk-ant-..." value={key} onChange={e => setKey(e.target.value)} />
+            <div style={{ fontSize:12, color:C.light, marginBottom:16 }}>
+              Haal je sleutel op via <a href="https://console.anthropic.com" target="_blank" style={{ color:C.navyLt }}>console.anthropic.com</a>
+            </div>
+            <button style={S.btnP} onClick={save}>{saved ? '✓ Opgeslagen' : 'Sleutel opslaan'}</button>
+          </div>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginTop:16 }}>
+            <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:16 }}>Gegevens</div>
+            <div style={{ fontSize:14, color:C.mid, marginBottom:16 }}>{gesprekken.length} gesprekken opgeslagen in lokale opslag.</div>
+            <button style={{ ...S.btnS, color:C.red, borderColor:C.red }}
+              onClick={() => { if(window.confirm('Alle gesprekken definitief verwijderen?')) { localStorage.removeItem('om-gesprekken'); window.location.reload(); } }}>
+              Alle gesprekken verwijderen
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── MAIN APP ─────────────────────────────────────────────────────────────
+    function App() {
+      const [apiKey, setApiKeyState] = useState(() => store.getApiKey());
+      const [showSetup, setShowSetup] = useState(() => !store.getApiKey());
+      const [view, setView] = useState('gesprekken');
+      const [gesprekken, setGesprekken] = useState(() => store.loadGesprekken());
+      const [editingId, setEditingId] = useState(null);
+
+      useEffect(() => { store.saveGesprekken(gesprekken); }, [gesprekken]);
+
+      const handleSaveKey = (k) => { store.setApiKey(k); setApiKeyState(k); setShowSetup(false); };
+      const handleSave = useCallback((data) => {
+        if (editingId) setGesprekken(prev => prev.map(g => g.id===editingId ? { ...data, id:editingId } : g));
+        else setGesprekken(prev => [...prev, { ...data, id:uid() }]);
+        setEditingId(null); setView('gesprekken');
+      }, [editingId]);
+
+      if (showSetup) return <SetupView onSave={handleSaveKey} />;
+
+      const navItems = [
+        { id:'gesprekken', label:'Gesprekken', icon:'💬' },
+        { id:'patronen',   label:'Patronen',   icon:'📊' },
+        { id:'notitie',    label:'Notitie',    icon:'✍️' },
+        { id:'instellingen', label:'Instellingen', icon:'⚙️' },
+      ];
+
+      return (
+        <div style={S.app}>
+          <header style={S.hdr}>
+            <div style={S.hdrIn}>
+              <div>
+                <div style={S.title}>OM Gesprekken</div>
+                <div style={S.sub}>{gesprekken.length} gesprekken · {gesprekken.filter(g=>g.type==='medewerker').length}M · {gesprekken.filter(g=>g.type==='stakeholder').length}S</div>
+              </div>
+              {view !== 'form' && (
+                <nav style={S.nav}>
+                  {navItems.map(n => (
+                    <button key={n.id} style={S.navBtn(view===n.id)} onClick={() => setView(n.id)}>
+                      <span style={{ display:'none' }}>{n.icon} </span>{n.label}
+                    </button>
+                  ))}
+                </nav>
+              )}
+            </div>
+          </header>
+          <main style={S.main}>
+            {view==='gesprekken' && <GesprekkenView gesprekken={gesprekken} onNew={() => { setEditingId(null); setView('form'); }} onEdit={id => { setEditingId(id); setView('form'); }} onDelete={id => setGesprekken(prev => prev.filter(g => g.id!==id))} />}
+            {view==='form' && <FormView gesprek={editingId ? gesprekken.find(g=>g.id===editingId) : null} onSave={handleSave} onCancel={() => { setEditingId(null); setView('gesprekken'); }} />}
+            {view==='patronen' && <PatronenView gesprekken={gesprekken} apiKey={apiKey} />}
+            {view==='notitie' && <NotitieView gesprekken={gesprekken} apiKey={apiKey} />}
+            {view==='instellingen' && <InstellingenView apiKey={apiKey} onSaveKey={handleSaveKey} gesprekken={gesprekken} />}
+          </main>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>
