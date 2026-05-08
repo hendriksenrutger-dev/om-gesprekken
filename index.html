@@ -47,10 +47,12 @@
 
     // ─── STORAGE (localStorage) ───────────────────────────────────────────────
     const store = {
-      loadGesprekken: () => { try { return JSON.parse(localStorage.getItem('om-gesprekken') || '[]'); } catch { return []; } },
-      saveGesprekken: (d) => { try { localStorage.setItem('om-gesprekken', JSON.stringify(d)); } catch {} },
-      getApiKey: () => localStorage.getItem('om-api-key') || '',
-      setApiKey: (k) => localStorage.setItem('om-api-key', k),
+      loadGesprekken:  () => { try { return JSON.parse(localStorage.getItem('om-gesprekken') || '[]'); } catch { return []; } },
+      saveGesprekken:  (d) => { try { localStorage.setItem('om-gesprekken', JSON.stringify(d)); } catch {} },
+      loadContext:     () => { try { return JSON.parse(localStorage.getItem('om-context') || '[]'); } catch { return []; } },
+      saveContext:     (d) => { try { localStorage.setItem('om-context', JSON.stringify(d)); } catch {} },
+      getApiKey:       () => localStorage.getItem('om-api-key') || '',
+      setApiKey:       (k) => localStorage.setItem('om-api-key', k),
     };
 
     // ─── CLAUDE API ───────────────────────────────────────────────────────────
@@ -394,6 +396,13 @@
       { key:'diag_toon',  label:'Toon',  field:DIAG_B[2] },
     ];
 
+    function contextToText(items) {
+      if (!items || items.length === 0) return '';
+      return items.filter(c => c.tekst?.trim()).map(c =>
+        `=== CONTEXT: ${c.label} ===\n${c.tekst}`
+      ).join('\n\n');
+    }
+
     function PatronenView({ gesprekken, apiKey }) {
       const [aiText, setAiText] = useState('');
       const [loading, setLoading] = useState(false);
@@ -609,6 +618,213 @@
       );
     }
 
+    // ─── DIAGNOSE VIEW ────────────────────────────────────────────────────────
+    const BRON_SUGGESTIONS = [
+      'Opdracht hoofdofficier',
+      'Intranetbeschrijving afdeling',
+      'Eigen bevindingen',
+      'O&F-plan (samenvatting)',
+      'Overig',
+    ];
+
+    function DiagnoseView({ gesprekken, bronnen, onBronnenChange, apiKey }) {
+      const [diagnose, setDiagnose] = useState(() => {
+        try { return localStorage.getItem('om-diagnose') || ''; } catch { return ''; }
+      });
+      const [history, setHistory] = useState([]);
+      const [input, setInput] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [err, setErr] = useState('');
+      const [editingId, setEditingId] = useState(null);
+
+      const saveDiagnose = (d) => {
+        setDiagnose(d);
+        try { localStorage.setItem('om-diagnose', d); } catch {}
+      };
+
+      const addBron = (label) => {
+        const item = { id: uid(), label, tekst: '' };
+        onBronnenChange([...bronnen, item]);
+        setEditingId(item.id);
+      };
+
+      const updateBron = (id, field, val) => {
+        onBronnenChange(bronnen.map(b => b.id === id ? { ...b, [field]: val } : b));
+      };
+
+      const removeBron = (id) => {
+        if (window.confirm('Dit bronblok verwijderen?')) onBronnenChange(bronnen.filter(b => b.id !== id));
+      };
+
+      const SYS = 'Je helpt een nieuw afdelingshoofd bij OM Parket Den Haag een diagnose te stellen van zijn afdeling. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal. De diagnose is een werkinstrument — geen beleidsnotitie.';
+
+      const buildPrompt = () => {
+        const gesprekkenText = gesprekken.map(gesprekToText).join('\n\n');
+        const bronText = bronnen.filter(b => b.tekst?.trim())
+          .map(b => `=== ${b.label.toUpperCase()} ===\n${b.tekst}`).join('\n\n');
+
+        return `Maak een diagnose van de afdeling op basis van de onderstaande informatie.
+
+${gesprekkenText ? `## GESPREKSNOTITIES (${gesprekken.length} gesprekken)\n\n${gesprekkenText}` : ''}
+${bronText ? `\n\n## AANVULLENDE BRONNEN\n\n${bronText}` : ''}
+
+Structuur van de diagnose:
+
+**Wat de afdeling goed doet** (2-3 concrete sterke punten)
+
+**Kernspanningsvelden** (4-6 — formuleer als: "Er is spanning tussen X en Y omdat Z")
+
+**Wat stakeholders verwachten maar niet krijgen** (alleen als er stakeholderdata is)
+
+**Wat de opdracht van de leiding vraagt** (alleen als er een opdracht of mandaat beschikbaar is in de bronnen)
+
+**Conclusie: wat is de kern van de opgave** (3-5 zinnen — wat moet er fundamenteel veranderen en waarom)
+
+Combineer de gespreksdata en de bronnen actief. Verwijs naar concrete inhoud. Analytisch, direct.`;
+      };
+
+      const generate = async () => {
+        if (!apiKey) { setErr('Geen API-sleutel — voeg die toe via de instellingen.'); return; }
+        if (gesprekken.length === 0 && bronnen.filter(b => b.tekst?.trim()).length === 0) {
+          setErr('Voeg eerst gesprekken of bronnen toe.'); return;
+        }
+        setLoading(true); setErr('');
+        try {
+          const prompt = buildPrompt();
+          const msgs = [{ role:'user', content: prompt }];
+          const result = await claude(msgs, SYS, apiKey);
+          saveDiagnose(result);
+          setHistory([...msgs, { role:'assistant', content: result }]);
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      const refine = async () => {
+        if (!input.trim() || !diagnose || !apiKey) return;
+        setLoading(true);
+        const newH = [...history, { role:'user', content: input }];
+        try {
+          const result = await claude(newH, SYS, apiKey);
+          saveDiagnose(result);
+          setHistory([...newH, { role:'assistant', content: result }]);
+          setInput('');
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      const wis = () => {
+        if (window.confirm('Diagnose wissen? De bronnen blijven bewaard.')) {
+          saveDiagnose(''); setHistory([]);
+        }
+      };
+
+      const totalBronChars = bronnen.reduce((n, b) => n + (b.tekst?.length || 0), 0);
+
+      return (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:20 }}>
+            <div>
+              <div style={S.secTitle}>Diagnose</div>
+              <div style={{ fontSize:13, color:C.mid }}>
+                {gesprekken.length} gesprekken · {bronnen.length} bronnen · {totalBronChars > 0 ? `${totalBronChars} tekens` : 'geen extra tekst'}
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              {diagnose && <button style={{ ...S.btnS, color:C.red, borderColor:C.red }} onClick={wis}>Wis diagnose</button>}
+              <button style={S.btnP} onClick={generate} disabled={loading}>
+                {loading ? <><Spinner /> Bezig…</> : diagnose ? '↻ Opnieuw' : '🔍 Maak diagnose'}
+              </button>
+            </div>
+          </div>
+
+          {err && <div style={{ background:'#fff0f0', border:'1px solid #f5c2c2', borderRadius:8, padding:'10px 14px', fontSize:13, color:C.red, marginBottom:16 }}>{err}</div>}
+
+          {/* Bronnen sectie */}
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, marginBottom:20, overflow:'hidden' }}>
+            <div style={{ background:C.navyDk, padding:'12px 18px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.white }}>Bronnen</span>
+              <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)' }}>naast de gesprekken</span>
+            </div>
+            <div style={{ padding:'16px 18px' }}>
+              {bronnen.length === 0 && (
+                <div style={{ fontSize:13, color:C.light, marginBottom:14, fontStyle:'italic' }}>
+                  Nog geen bronnen — de diagnose gebruikt alleen de gesprekken. Voeg extra context toe om de diagnose te verrijken.
+                </div>
+              )}
+              {bronnen.map(b => (
+                <div key={b.id} style={{ border:`1px solid ${editingId===b.id ? C.navy : C.border}`, borderRadius:8, padding:14, marginBottom:10, boxShadow: editingId===b.id ? `0 0 0 3px rgba(26,48,87,0.1)` : 'none' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                    <input style={{ ...S.inp, fontWeight:600, fontSize:13, color:C.navy, border:'none', padding:0, background:'transparent', flex:1 }}
+                      value={b.label} onChange={e => updateBron(b.id,'label',e.target.value)} onFocus={() => setEditingId(b.id)} />
+                    <button onClick={() => removeBron(b.id)} style={{ background:'none', border:'none', cursor:'pointer', color:C.light, fontSize:18, padding:'0 4px', lineHeight:1 }}>×</button>
+                  </div>
+                  <textarea style={{ ...S.ta, minHeight:100 }} placeholder="Plak of typ hier de tekst…"
+                    value={b.tekst||''} onChange={e => updateBron(b.id,'tekst',e.target.value)} onFocus={() => setEditingId(b.id)} />
+                  {b.tekst && <div style={{ fontSize:11, color:C.light, marginTop:3, textAlign:'right' }}>{b.tekst.length} tekens</div>}
+                </div>
+              ))}
+              <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:4 }}>
+                {BRON_SUGGESTIONS.map(s => (
+                  <button key={s} onClick={() => addBron(s)}
+                    style={{ padding:'6px 12px', borderRadius:20, border:`1.5px solid ${C.navyLt}`, background:C.white, color:C.navyLt, fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                    + {s}
+                  </button>
+                ))}
+                <button onClick={() => addBron('Eigen label')}
+                  style={{ padding:'6px 12px', borderRadius:20, border:`1.5px solid ${C.border}`, background:C.white, color:C.mid, fontSize:11, cursor:'pointer' }}>
+                  + Eigen label
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Diagnose resultaat */}
+          {!diagnose && !loading && (
+            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:40, textAlign:'center', color:C.mid }}>
+              <div style={{ fontSize:36, marginBottom:12 }}>🔍</div>
+              <div style={{ fontSize:14, fontWeight:600, marginBottom:6 }}>Nog geen diagnose</div>
+              <div style={{ fontSize:13 }}>Voeg bronnen toe (optioneel) en klik op "Maak diagnose".<br/>Claude combineert de gesprekken en bronnen tot een diagnose.</div>
+            </div>
+          )}
+
+          {loading && <div style={{ textAlign:'center', padding:40, color:C.mid, fontSize:14 }}>Diagnose wordt gemaakt…</div>}
+
+          {diagnose && !loading && (
+            <div className="fade-in">
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, overflow:'hidden', marginBottom:16 }}>
+                <div style={{ background:C.navy, padding:'12px 18px' }}>
+                  <span style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.white }}>Diagnose</span>
+                </div>
+                <div style={{ ...S.aiBox, borderRadius:0, border:'none' }}>{diagnose}</div>
+              </div>
+
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:18, marginBottom:16 }}>
+                <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.navy, marginBottom:10 }}>Verfijn of stel een vraag</div>
+                {history.filter(m => m.role==='user').slice(1).map((m,i) => (
+                  <div key={i} style={{ fontSize:12, color:C.mid, padding:'5px 10px', background:C.creamDk, borderRadius:6, marginBottom:6 }}>↳ {m.content}</div>
+                ))}
+                <div style={{ display:'flex', gap:8 }}>
+                  <input style={{ ...S.inp, flex:1 }}
+                    placeholder="Bijv: 'Ga dieper in op de rol van I&O' of 'Wat ontbreekt er nog in deze diagnose?'"
+                    value={input} onChange={e => setInput(e.target.value)}
+                    onKeyDown={e => e.key==='Enter' && !e.shiftKey && refine()} />
+                  <button style={S.btnP} onClick={refine} disabled={loading || !input.trim()}>
+                    {loading ? <Spinner /> : 'Stuur'}
+                  </button>
+                </div>
+                <div style={{ fontSize:11, color:C.light, marginTop:6 }}>Claude houdt de context van eerdere aanpassingen bij.</div>
+              </div>
+
+              <div style={{ display:'flex', gap:8 }}>
+                <button style={S.btnS} onClick={() => navigator.clipboard?.writeText(diagnose)}>📋 Kopieer</button>
+                <button style={{ ...S.btnS, color:C.light, borderColor:C.border }} onClick={wis}>Wis diagnose</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     // ─── INSTELLINGEN ─────────────────────────────────────────────────────────
     function InstellingenView({ apiKey, onSaveKey, gesprekken }) {
       const [key, setKey] = useState(apiKey);
@@ -645,9 +861,11 @@
       const [showSetup, setShowSetup] = useState(() => !store.getApiKey());
       const [view, setView] = useState('gesprekken');
       const [gesprekken, setGesprekken] = useState(() => store.loadGesprekken());
+      const [bronnen, setBronnen] = useState(() => store.loadContext());
       const [editingId, setEditingId] = useState(null);
 
       useEffect(() => { store.saveGesprekken(gesprekken); }, [gesprekken]);
+      useEffect(() => { store.saveContext(bronnen); }, [bronnen]);
 
       const handleSaveKey = (k) => { store.setApiKey(k); setApiKeyState(k); setShowSetup(false); };
       const handleSave = useCallback((data) => {
@@ -659,10 +877,11 @@
       if (showSetup) return <SetupView onSave={handleSaveKey} />;
 
       const navItems = [
-        { id:'gesprekken', label:'Gesprekken', icon:'💬' },
-        { id:'patronen',   label:'Patronen',   icon:'📊' },
-        { id:'notitie',    label:'Notitie',    icon:'✍️' },
-        { id:'instellingen', label:'Instellingen', icon:'⚙️' },
+        { id:'gesprekken',   label:'Gesprekken',   },
+        { id:'patronen',     label:'Patronen',     },
+        { id:'diagnose',     label:'Diagnose',     },
+        { id:'notitie',      label:'Notitie',      },
+        { id:'instellingen', label:'Instellingen', },
       ];
 
       return (
@@ -671,13 +890,13 @@
             <div style={S.hdrIn}>
               <div>
                 <div style={S.title}>OM Gesprekken</div>
-                <div style={S.sub}>{gesprekken.length} gesprekken · {gesprekken.filter(g=>g.type==='medewerker').length}M · {gesprekken.filter(g=>g.type==='stakeholder').length}S</div>
+                <div style={S.sub}>{gesprekken.length} gesprekken · {gesprekken.filter(g=>g.type==='medewerker').length}M · {gesprekken.filter(g=>g.type==='stakeholder').length}S{bronnen.length > 0 ? ` · ${bronnen.length} bronnen` : ''}</div>
               </div>
               {view !== 'form' && (
                 <nav style={S.nav}>
                   {navItems.map(n => (
                     <button key={n.id} style={S.navBtn(view===n.id)} onClick={() => setView(n.id)}>
-                      <span style={{ display:'none' }}>{n.icon} </span>{n.label}
+                      {n.label}
                     </button>
                   ))}
                 </nav>
@@ -688,6 +907,7 @@
             {view==='gesprekken' && <GesprekkenView gesprekken={gesprekken} onNew={() => { setEditingId(null); setView('form'); }} onEdit={id => { setEditingId(id); setView('form'); }} onDelete={id => setGesprekken(prev => prev.filter(g => g.id!==id))} />}
             {view==='form' && <FormView gesprek={editingId ? gesprekken.find(g=>g.id===editingId) : null} onSave={handleSave} onCancel={() => { setEditingId(null); setView('gesprekken'); }} />}
             {view==='patronen' && <PatronenView gesprekken={gesprekken} apiKey={apiKey} />}
+            {view==='diagnose' && <DiagnoseView gesprekken={gesprekken} bronnen={bronnen} onBronnenChange={setBronnen} apiKey={apiKey} />}
             {view==='notitie' && <NotitieView gesprekken={gesprekken} apiKey={apiKey} />}
             {view==='instellingen' && <InstellingenView apiKey={apiKey} onSaveKey={handleSaveKey} gesprekken={gesprekken} />}
           </main>
