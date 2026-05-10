@@ -663,24 +663,28 @@
         const bronText = bronnen.filter(b => b.tekst?.trim())
           .map(b => `=== ${b.label.toUpperCase()} ===\n${b.tekst}`).join('\n\n');
 
-        return `Maak een diagnose van de afdeling op basis van de onderstaande informatie.
+        return `Je bent een scherpe organisatieadviseur die een diagnose stelt van een afdeling bij OM Parket Den Haag. De diagnose moet eerlijk, analytisch en direct zijn — geen diplomatieke omwegen, geen actieadviezen, geen stappenplannen.
+
+Hieronder staan gespreksnotities van kennismakingsgesprekken én aanvullende bronnen waaronder de eigen bevindingen en observaties van het afdelingshoofd. Die eigen bevindingen zijn geen bijlage — ze zijn een primaire bron die de diagnose mede bepaalt.
 
 ${gesprekkenText ? `## GESPREKSNOTITIES (${gesprekken.length} gesprekken)\n\n${gesprekkenText}` : ''}
-${bronText ? `\n\n## AANVULLENDE BRONNEN\n\n${bronText}` : ''}
+${bronText ? `\n\n## AANVULLENDE BRONNEN EN EIGEN BEVINDINGEN\n\n${bronText}` : ''}
 
-Structuur van de diagnose:
+Schrijf een diagnose met de volgende structuur:
 
-**Wat de afdeling goed doet** (2-3 concrete sterke punten)
+**Wat structureel niet klopt**
+Benoem 3-5 dingen die fundamenteel niet goed functioneren. Niet gedragssymptomen maar onderliggende oorzaken. Wees concreet: wat ontbreekt, wat klopt niet, waar zit de werkelijke disfunctie? Gebruik wat je hoort in de gesprekken én wat het afdelingshoofd zelf observeert.
 
-**Kernspanningsvelden** (4-6 — formuleer als: "Er is spanning tussen X en Y omdat Z")
+**Waarom het mis gaat**
+Per punt: wat is de oorzaak? Gaat het om onduidelijke kaders, verkeerde verwachtingen, structuurproblemen, cultuur, of een combinatie? Verklaar, analyseer — geen oordelen over mensen.
 
-**Wat stakeholders verwachten maar niet krijgen** (alleen als er stakeholderdata is)
+**Op welke gebieden verbetering nodig is**
+Benoem de gebieden (bijv. rolduidelijkheid, externe gerichtheid, sturing, samenwerking) en beschrijf per gebied wat er concreet anders moet — niet hoe, maar wat de gewenste toestand is.
 
-**Wat de opdracht van de leiding vraagt** (alleen als er een opdracht of mandaat beschikbaar is in de bronnen)
+**Wat de kern is**
+Een alinea van 4-6 zinnen: wat is de essentie van de problematiek? Als je één ding zou kunnen zeggen over wat er mis is met deze afdeling, wat is dat dan?
 
-**Conclusie: wat is de kern van de opgave** (3-5 zinnen — wat moet er fundamenteel veranderen en waarom)
-
-Combineer de gespreksdata en de bronnen actief. Verwijs naar concrete inhoud. Analytisch, direct.`;
+Geen actieadviezen. Geen "ga met X praten". Geen stappenplannen. Dit is een diagnose, geen interventieplan.`;`
       };
 
       const generate = async () => {
@@ -849,7 +853,7 @@ Combineer de gespreksdata en de bronnen actief. Verwijs naar concrete inhoud. An
         if (!apiKey) { setErr('Geen API-sleutel.'); return; }
         setLoading(true); setErr(''); setOpen(true);
         try {
-          const msgs = [{ role:'user', content:`Schrijf een compacte notitie op basis van deze diagnose:\n\n${diagnose}\n\nStructuur:\n\n**Kern van de opgave** (2-3 zinnen — wat is de essentie)\n\n**Wat goed gaat en behouden moet** (2-3 punten)\n\n**Wat moet veranderen** (3-5 concrete punten, direct geformuleerd)\n\n**Eerste acties** (2-3 dingen die nu al kunnen, zonder formeel besluit)\n\nMaximaal 1 A4. Geen herhaling van de diagnose — dit is de vertaling naar actie.` }];
+          const msgs = [{ role:'user', content:`Schrijf een scherpe, compacte notitie op basis van deze diagnose:\n\n${diagnose}\n\nDe notitie is geen actieplan en geen stappenplan. Het is een heldere samenvatting van wat er structureel mis is en wat er moet veranderen — bedoeld als sturingsinstrument voor het afdelingshoofd zelf en als basis voor een gesprek met de leiding.\n\nStructuur:\n\n**De kern** (3-4 zinnen — wat is de essentie van de problematiek, direct geformuleerd)\n\n**Wat structureel niet klopt** (4-6 punten, concreet en zonder omwegen — dit zijn de feiten)\n\n**Wat er moet veranderen** (per gebied: niet hoe maar wat de gewenste situatie is)\n\n**Wat dit vraagt van de afdeling** (niet van het afdelingshoofd, maar van de afdeling als geheel — wat is de opgave)\n\nMaximaal 1 A4. Geen actieadviezen. Geen "ga dit doen". Analytisch, direct, eerlijk.` }];
           const result = await claude(msgs, SYS, apiKey);
           saveNotitie(result);
           setHistory([...msgs, { role:'assistant', content:result }]);
