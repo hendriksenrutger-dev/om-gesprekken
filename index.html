@@ -826,15 +826,66 @@ Combineer de gespreksdata en de bronnen actief. Verwijs naar concrete inhoud. An
     }
 
     // ─── INSTELLINGEN ─────────────────────────────────────────────────────────
-    function InstellingenView({ apiKey, onSaveKey, gesprekken }) {
+    function InstellingenView({ apiKey, onSaveKey, gesprekken, bronnen, onImport }) {
       const [key, setKey] = useState(apiKey);
       const [saved, setSaved] = useState(false);
+      const [importErr, setImportErr] = useState('');
+      const [importOk, setImportOk] = useState('');
+      const fileRef = React.useRef();
+
       const save = () => { onSaveKey(key); setSaved(true); setTimeout(() => setSaved(false), 2000); };
+
+      const exportData = () => {
+        const data = { versie: 1, datum: new Date().toISOString(), gesprekken, bronnen };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `om-gesprekken-${new Date().toISOString().slice(0,10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      const importData = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const data = JSON.parse(ev.target.result);
+            if (!data.gesprekken) throw new Error('Ongeldig bestand');
+            onImport(data);
+            setImportErr('');
+            setImportOk(`${data.gesprekken.length} gesprekken en ${(data.bronnen||[]).length} bronnen teruggezet.`);
+            setTimeout(() => setImportOk(''), 4000);
+          } catch {
+            setImportErr('Ongeldig bestand — controleer of je het juiste JSON-bestand uploadt.');
+          }
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+      };
+
       return (
         <div>
           <div style={S.secTitle}>Instellingen</div>
+
           <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginTop:20 }}>
-            <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:16 }}>API-sleutel</div>
+            <div style={{ fontFamily:"'Lora',serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:6 }}>Back-up</div>
+            <div style={{ fontSize:13, color:C.mid, marginBottom:16 }}>
+              Exporteer alle gesprekken en bronnen als JSON. Bewaar dit op een veilige plek — je kunt het altijd terugzetten, ook na een URL-wijziging of herinstallatie.
+            </div>
+            <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+              <button style={S.btnP} onClick={exportData}>⬇ Exporteer ({gesprekken.length} gesprekken)</button>
+              <button style={S.btnS} onClick={() => fileRef.current.click()}>⬆ Importeer back-up</button>
+              <input ref={fileRef} type="file" accept=".json" style={{ display:'none' }} onChange={importData} />
+            </div>
+            {importOk && <div style={{ fontSize:13, color:C.green, marginTop:10, fontWeight:600 }}>✓ {importOk}</div>}
+            {importErr && <div style={{ fontSize:13, color:C.red, marginTop:10 }}>{importErr}</div>}
+          </div>
+
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginTop:16 }}>
+            <div style={{ fontFamily:"'Lora',serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:16 }}>API-sleutel</div>
             <label style={S.label}>Anthropic API-sleutel</label>
             <input style={{ ...S.inp, fontFamily:'monospace', fontSize:13, marginBottom:8 }}
               type="password" placeholder="sk-ant-..." value={key} onChange={e => setKey(e.target.value)} />
@@ -843,12 +894,13 @@ Combineer de gespreksdata en de bronnen actief. Verwijs naar concrete inhoud. An
             </div>
             <button style={S.btnP} onClick={save}>{saved ? '✓ Opgeslagen' : 'Sleutel opslaan'}</button>
           </div>
+
           <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginTop:16 }}>
-            <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:16 }}>Gegevens</div>
-            <div style={{ fontSize:14, color:C.mid, marginBottom:16 }}>{gesprekken.length} gesprekken opgeslagen in lokale opslag.</div>
+            <div style={{ fontFamily:"'Lora',serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:16 }}>Gegevens</div>
+            <div style={{ fontSize:14, color:C.mid, marginBottom:16 }}>{gesprekken.length} gesprekken · {bronnen.length} bronnen in lokale opslag.</div>
             <button style={{ ...S.btnS, color:C.red, borderColor:C.red }}
-              onClick={() => { if(window.confirm('Alle gesprekken definitief verwijderen?')) { localStorage.removeItem('om-gesprekken'); window.location.reload(); } }}>
-              Alle gesprekken verwijderen
+              onClick={() => { if(window.confirm('Alle gesprekken, bronnen en diagnose definitief verwijderen?')) { localStorage.removeItem('om-gesprekken'); localStorage.removeItem('om-context'); localStorage.removeItem('om-diagnose'); window.location.reload(); } }}>
+              Alle gegevens verwijderen
             </button>
           </div>
         </div>
@@ -866,6 +918,11 @@ Combineer de gespreksdata en de bronnen actief. Verwijs naar concrete inhoud. An
 
       useEffect(() => { store.saveGesprekken(gesprekken); }, [gesprekken]);
       useEffect(() => { store.saveContext(bronnen); }, [bronnen]);
+
+      const handleImport = useCallback((data) => {
+        setGesprekken(data.gesprekken || []);
+        setBronnen(data.bronnen || []);
+      }, []);
 
       const handleSaveKey = (k) => { store.setApiKey(k); setApiKeyState(k); setShowSetup(false); };
       const handleSave = useCallback((data) => {
@@ -909,7 +966,7 @@ Combineer de gespreksdata en de bronnen actief. Verwijs naar concrete inhoud. An
             {view==='patronen' && <PatronenView gesprekken={gesprekken} apiKey={apiKey} />}
             {view==='diagnose' && <DiagnoseView gesprekken={gesprekken} bronnen={bronnen} onBronnenChange={setBronnen} apiKey={apiKey} />}
             {view==='notitie' && <NotitieView gesprekken={gesprekken} apiKey={apiKey} />}
-            {view==='instellingen' && <InstellingenView apiKey={apiKey} onSaveKey={handleSaveKey} gesprekken={gesprekken} />}
+            {view==='instellingen' && <InstellingenView apiKey={apiKey} onSaveKey={handleSaveKey} gesprekken={gesprekken} bronnen={bronnen} onImport={handleImport} />}
           </main>
         </div>
       );
