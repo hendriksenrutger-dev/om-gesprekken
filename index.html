@@ -819,8 +819,114 @@ Combineer de gespreksdata en de bronnen actief. Verwijs naar concrete inhoud. An
                 <button style={S.btnS} onClick={() => navigator.clipboard?.writeText(diagnose)}>📋 Kopieer</button>
                 <button style={{ ...S.btnS, color:C.light, borderColor:C.border }} onClick={wis}>Wis diagnose</button>
               </div>
+
+              {/* ── Notitie op basis van diagnose ── */}
+              <DiagnoseNotitie diagnose={diagnose} apiKey={apiKey} />
             </div>
           )}
+        </div>
+      );
+    }
+
+    function DiagnoseNotitie({ diagnose, apiKey }) {
+      const [notitie, setNotitie] = useState(() => {
+        try { return localStorage.getItem('om-diagnose-notitie') || ''; } catch { return ''; }
+      });
+      const [history, setHistory] = useState([]);
+      const [input, setInput] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [err, setErr] = useState('');
+      const [open, setOpen] = useState(false);
+
+      const saveNotitie = (n) => {
+        setNotitie(n);
+        try { localStorage.setItem('om-diagnose-notitie', n); } catch {}
+      };
+
+      const SYS = 'Je schrijft een compacte, scherpe notitie op basis van een diagnose voor een nieuw afdelingshoofd bij OM Parket Den Haag. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal. Maximaal 1 A4. Dit is een sturingsinstrument, geen beleidsnotitie.';
+
+      const generate = async () => {
+        if (!apiKey) { setErr('Geen API-sleutel.'); return; }
+        setLoading(true); setErr(''); setOpen(true);
+        try {
+          const msgs = [{ role:'user', content:`Schrijf een compacte notitie op basis van deze diagnose:\n\n${diagnose}\n\nStructuur:\n\n**Kern van de opgave** (2-3 zinnen — wat is de essentie)\n\n**Wat goed gaat en behouden moet** (2-3 punten)\n\n**Wat moet veranderen** (3-5 concrete punten, direct geformuleerd)\n\n**Eerste acties** (2-3 dingen die nu al kunnen, zonder formeel besluit)\n\nMaximaal 1 A4. Geen herhaling van de diagnose — dit is de vertaling naar actie.` }];
+          const result = await claude(msgs, SYS, apiKey);
+          saveNotitie(result);
+          setHistory([...msgs, { role:'assistant', content:result }]);
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      const refine = async () => {
+        if (!input.trim() || !notitie || !apiKey) return;
+        setLoading(true);
+        const newH = [...history, { role:'user', content:input }];
+        try {
+          const result = await claude(newH, SYS, apiKey);
+          saveNotitie(result);
+          setHistory([...newH, { role:'assistant', content:result }]);
+          setInput('');
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      return (
+        <div style={{ marginTop:24 }}>
+          <div style={{ background:C.navyDk, borderRadius:10, overflow:'hidden' }}>
+            <div style={{ padding:'14px 18px', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer' }}
+              onClick={() => setOpen(o => !o)}>
+              <span style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.white }}>
+                Notitie op basis van diagnose
+              </span>
+              <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                {notitie && <span style={{ fontSize:10, color:'rgba(255,255,255,0.5)' }}>opgeslagen</span>}
+                <button style={{ ...S.btnP, padding:'6px 14px', fontSize:12 }}
+                  onClick={e => { e.stopPropagation(); generate(); }} disabled={loading}>
+                  {loading ? <Spinner /> : notitie ? '↻ Opnieuw' : 'Maak notitie'}
+                </button>
+                <span style={{ color:'rgba(255,255,255,0.5)', fontSize:16 }}>{open ? '−' : '+'}</span>
+              </div>
+            </div>
+
+            {open && (
+              <div style={{ padding:'0 18px 18px' }} className="fade-in">
+                {err && <div style={{ fontSize:13, color:'#f5a0a0', marginBottom:10 }}>{err}</div>}
+
+                {!notitie && !loading && (
+                  <div style={{ fontSize:13, color:'rgba(255,255,255,0.4)', fontStyle:'italic', padding:'10px 0' }}>
+                    Klik op "Maak notitie" — Claude vertaalt de diagnose naar een compacte actienotitie.
+                  </div>
+                )}
+                {loading && <div style={{ fontSize:13, color:'rgba(255,255,255,0.5)', padding:'10px 0' }}>Notitie wordt geschreven…</div>}
+
+                {notitie && !loading && (
+                  <>
+                    <div style={{ ...S.aiBox, background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', color:C.white, marginBottom:14 }}>{notitie}</div>
+
+                    <div style={{ display:'flex', gap:8, marginBottom:12 }}>
+                      <input style={{ ...S.inp, flex:1, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:C.white }}
+                        placeholder="Bijv: 'Maak de eerste acties concreter' of 'Kort in tot een halve A4'"
+                        value={input} onChange={e => setInput(e.target.value)}
+                        onKeyDown={e => e.key==='Enter' && !e.shiftKey && refine()} />
+                      <button style={S.btnP} onClick={refine} disabled={loading || !input.trim()}>
+                        {loading ? <Spinner /> : 'Stuur'}
+                      </button>
+                    </div>
+                    {history.filter(m => m.role==='user').slice(1).map((m,i) => (
+                      <div key={i} style={{ fontSize:11, color:'rgba(255,255,255,0.4)', padding:'4px 8px', background:'rgba(255,255,255,0.05)', borderRadius:5, marginBottom:4 }}>↳ {m.content}</div>
+                    ))}
+
+                    <div style={{ display:'flex', gap:8, marginTop:8 }}>
+                      <button style={{ ...S.btnS, borderColor:'rgba(255,255,255,0.3)', color:'rgba(255,255,255,0.7)' }}
+                        onClick={() => navigator.clipboard?.writeText(notitie)}>📋 Kopieer</button>
+                      <button style={{ ...S.btnS, borderColor:'rgba(255,255,255,0.15)', color:'rgba(255,255,255,0.4)' }}
+                        onClick={() => { saveNotitie(''); setHistory([]); }}>Wis notitie</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       );
     }
