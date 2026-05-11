@@ -725,22 +725,37 @@ Geen actiepunten. Geen "ga met X in gesprek". Geen voorstellen. Dit is een diagn
         setLoading(false);
       };
 
-      const refine = async () => {
+      const [chatHistory, setChatHistory] = useState([]);
+      const [chatLoading, setChatLoading] = useState(false);
+
+      const chat = async () => {
         if (!input.trim() || !diagnose || !apiKey) return;
-        setLoading(true);
-        const newH = [...history, { role:'user', content: input }];
+        setChatLoading(true);
+        const userMsg = { role:'user', content: input };
+        const contextMsg = { role:'user', content: `De huidige diagnose is:\n\n${diagnose}\n\nVraag: ${input}` };
+        const msgs = [contextMsg];
         try {
-          const result = await claude(newH, SYS, apiKey);
-          saveDiagnose(result);
-          setHistory([...newH, { role:'assistant', content: result }]);
+          const result = await claude(msgs, SYS, apiKey);
+          setChatHistory(prev => [...prev, { vraag: input, antwoord: result }]);
           setInput('');
+        } catch(e) { setErr(e.message); }
+        setChatLoading(false);
+      };
+
+      const incorporeer = async (antwoord) => {
+        setLoading(true);
+        const prompt = `Dit is de huidige diagnose:\n\n${diagnose}\n\nDit is een aanvulling of correctie die verwerkt moet worden:\n\n${antwoord}\n\nPas de diagnose gericht aan op basis van deze aanvulling. Herschrijf alleen wat relevant verandert — behoud de rest zoals het is. Geen nieuwe structuur, geen nieuwe opzet.`;
+        try {
+          const result = await claude([{ role:'user', content: prompt }], SYS, apiKey);
+          saveDiagnose(result);
+          setChatHistory([]);
         } catch(e) { setErr(e.message); }
         setLoading(false);
       };
 
       const wis = () => {
         if (window.confirm('Diagnose wissen? De bronnen blijven bewaard.')) {
-          saveDiagnose(''); setHistory([]);
+          saveDiagnose(''); setHistory([]); setChatHistory([]);
         }
       };
 
@@ -824,21 +839,46 @@ Geen actiepunten. Geen "ga met X in gesprek". Geen voorstellen. Dit is een diagn
                 <div style={{ ...S.aiBox, borderRadius:0, border:'none' }}>{diagnose}</div>
               </div>
 
+
+              {/* Chat */}
               <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:18, marginBottom:16 }}>
-                <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.navy, marginBottom:10 }}>Verfijn of stel een vraag</div>
-                {history.filter(m => m.role==='user').slice(1).map((m,i) => (
-                  <div key={i} style={{ fontSize:12, color:C.mid, padding:'5px 10px', background:C.creamDk, borderRadius:6, marginBottom:6 }}>↳ {m.content}</div>
-                ))}
+                <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.navy, marginBottom:12 }}>Stel een vraag over de diagnose</div>
+
+                {chatHistory.length > 0 && (
+                  <div style={{ marginBottom:14, display:'flex', flexDirection:'column', gap:12 }}>
+                    {chatHistory.map((item, i) => (
+                      <div key={i}>
+                        <div style={{ fontSize:12, fontWeight:600, color:C.navy, background:C.creamDk, padding:'7px 12px', borderRadius:'8px 8px 0 0' }}>
+                          ↗ {item.vraag}
+                        </div>
+                        <div style={{ fontSize:13, color:C.text, background:'#F8F7F3', padding:'10px 12px', borderRadius:'0 0 8px 8px', lineHeight:1.65, whiteSpace:'pre-wrap', borderLeft:`3px solid ${C.navyLt}` }}>
+                          {item.antwoord}
+                        </div>
+                        <div style={{ display:'flex', gap:8, marginTop:6 }}>
+                          <button onClick={() => incorporeer(item.antwoord)} disabled={loading}
+                            style={{ ...S.btnS, fontSize:11, padding:'5px 12px', color:C.green, borderColor:C.green }}>
+                            {loading ? <Spinner /> : '↳ Verwerk in diagnose'}
+                          </button>
+                          <button onClick={() => setChatHistory(prev => prev.filter((_,j) => j !== i))}
+                            style={{ background:'none', border:'none', cursor:'pointer', fontSize:11, color:C.light }}>
+                            verwijder
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <div style={{ display:'flex', gap:8 }}>
                   <input style={{ ...S.inp, flex:1 }}
-                    placeholder="Bijv: 'Ga dieper in op de rol van I&O' of 'Wat ontbreekt er nog in deze diagnose?'"
+                    placeholder="Bijv: 'Wat zegt dit over I&O?' of 'Ontbreekt er iets in de analyse?'"
                     value={input} onChange={e => setInput(e.target.value)}
-                    onKeyDown={e => e.key==='Enter' && !e.shiftKey && refine()} />
-                  <button style={S.btnP} onClick={refine} disabled={loading || !input.trim()}>
-                    {loading ? <Spinner /> : 'Stuur'}
+                    onKeyDown={e => e.key==='Enter' && !e.shiftKey && chat()} />
+                  <button style={S.btnP} onClick={chat} disabled={chatLoading || !input.trim()}>
+                    {chatLoading ? <Spinner /> : 'Vraag'}
                   </button>
                 </div>
-                <div style={{ fontSize:11, color:C.light, marginTop:6 }}>Claude houdt de context van eerdere aanpassingen bij.</div>
+                <div style={{ fontSize:11, color:C.light, marginTop:6 }}>Antwoord verschijnt hier — de diagnose blijft ongewijzigd totdat je kiest voor "Verwerk in diagnose".</div>
               </div>
 
               <div style={{ display:'flex', gap:8 }}>
