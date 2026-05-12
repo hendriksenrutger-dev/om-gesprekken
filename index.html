@@ -474,10 +474,10 @@
           </div>
           {err && <div style={{ background:'#fff0f0', border:'1px solid #f5c2c2', borderRadius:8, padding:'10px 14px', fontSize:13, color:C.red, marginBottom:16 }}>{err}</div>}
           <div style={{ display:'flex', gap:8, marginBottom:20 }}>
-            {['matrix','ai'].map(t => (
+            {['matrix','grafieken','ai'].map(t => (
               <button key={t} onClick={() => setTab(t)}
                 style={{ ...S.btnS, background: tab===t ? C.navy : 'transparent', color: tab===t ? C.white : C.navy }}>
-                {t === 'matrix' ? '📋 Visuele matrix' : '🤖 AI-analyse'}
+                {t === 'matrix' ? '📋 Visuele matrix' : t === 'grafieken' ? '📊 Grafieken' : '🤖 AI-analyse'}
               </button>
             ))}
           </div>
@@ -511,6 +511,8 @@
             </div>
           )}
 
+          {tab === 'grafieken' && <GrafiekenView medewerkers={medewerkers} stakeholders={stakeholders} />}
+
           {tab === 'ai' && (
             <div className="fade-in">
               {loading && <div style={{ textAlign:'center', padding:40, color:C.mid, fontSize:14 }}>Patronen worden geanalyseerd…</div>}
@@ -518,6 +520,187 @@
               {!loading && !aiText && <div style={S.empty}><div style={{ fontSize:14 }}>Klik op "Analyseer patronen" om te starten.</div></div>}
             </div>
           )}
+        </div>
+      );
+    }
+
+    // ─── GRAFIEKEN ────────────────────────────────────────────────────────────
+    function DonutChart({ title, data, size = 140 }) {
+      const total = data.reduce((s, d) => s + d.value, 0);
+      if (total === 0) return null;
+      const cx = size / 2, cy = size / 2, r = size * 0.36, inner = size * 0.22;
+      let angle = -Math.PI / 2;
+      const slices = data.filter(d => d.value > 0).map(d => {
+        const start = angle;
+        angle += (d.value / total) * 2 * Math.PI;
+        return { ...d, start, end: angle };
+      });
+
+      const arc = (s, e, ro, ri) => {
+        const x1 = cx + ro * Math.cos(s), y1 = cy + ro * Math.sin(s);
+        const x2 = cx + ro * Math.cos(e), y2 = cy + ro * Math.sin(e);
+        const x3 = cx + ri * Math.cos(e), y3 = cy + ri * Math.sin(e);
+        const x4 = cx + ri * Math.cos(s), y4 = cy + ri * Math.sin(s);
+        const large = e - s > Math.PI ? 1 : 0;
+        return `M ${x1} ${y1} A ${ro} ${ro} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${ri} ${ri} 0 ${large} 0 ${x4} ${y4} Z`;
+      };
+
+      return (
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10 }}>
+          <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.navy, textAlign:'center' }}>{title}</div>
+          <svg width={size} height={size}>
+            {slices.map((s, i) => <path key={i} d={arc(s.start, s.end, r, inner)} fill={s.color} opacity={0.9} />)}
+            <text x={cx} y={cy + 4} textAnchor="middle" fontSize={size * 0.14} fontWeight="700" fill={C.navy}>{total}</text>
+          </svg>
+          <div style={{ display:'flex', flexDirection:'column', gap:4, width:'100%' }}>
+            {data.filter(d => d.value > 0).map((d, i) => (
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:6, fontSize:11 }}>
+                <div style={{ width:10, height:10, borderRadius:2, background:d.color, flexShrink:0 }} />
+                <span style={{ color:C.mid, flex:1 }}>{d.label}</span>
+                <span style={{ fontWeight:700, color:C.navy }}>{d.value}</span>
+                <span style={{ color:C.light }}>({Math.round(d.value/total*100)}%)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    function BarChart({ title, groups }) {
+      const max = Math.max(...groups.map(g => g.values.reduce((s,v) => s+v, 0)), 1);
+      return (
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.navy }}>{title}</div>
+          {groups.map((g, i) => {
+            const total = g.values.reduce((s,v) => s+v, 0);
+            return (
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <div style={{ fontSize:11, color:C.navy, fontWeight:600, width:90, flexShrink:0, textAlign:'right' }}>{g.label}</div>
+                <div style={{ flex:1, display:'flex', height:22, borderRadius:4, overflow:'hidden', gap:1 }}>
+                  {g.values.map((v, j) => v > 0 ? (
+                    <div key={j} style={{ flex:v, background:g.colors[j], display:'flex', alignItems:'center', justifyContent:'center' }}>
+                      <span style={{ fontSize:9, fontWeight:700, color:C.white }}>{v}</span>
+                    </div>
+                  ) : null)}
+                  {total === 0 && <div style={{ flex:1, background:C.creamDk }} />}
+                </div>
+                <div style={{ fontSize:10, color:C.light, width:20, textAlign:'right' }}>{total}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function GrafiekenView({ medewerkers, stakeholders }) {
+      const chartRef = React.useRef();
+
+      const count = (arr, key, opts) => opts.map(o => arr.filter(g => g[key] === o).length);
+
+      const exportCharts = () => {
+        const el = chartRef.current;
+        if (!el) return;
+        const canvas = document.createElement('canvas');
+        const scale = 2;
+        canvas.width = el.offsetWidth * scale;
+        canvas.height = el.offsetHeight * scale;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(scale, scale);
+        ctx.fillStyle = '#F6F2EA';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Use html2canvas-like approach via SVG foreignObject
+        const data = new XMLSerializer().serializeToString(
+          (() => {
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('width', el.offsetWidth);
+            svg.setAttribute('height', el.offsetHeight);
+            const fo = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
+            fo.setAttribute('width', '100%');
+            fo.setAttribute('height', '100%');
+            const div = document.createElement('div');
+            div.innerHTML = el.outerHTML;
+            fo.appendChild(div);
+            svg.appendChild(fo);
+            return svg;
+          })()
+        );
+        const blob = new Blob([data], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, el.offsetWidth, el.offsetHeight);
+          const link = document.createElement('a');
+          link.download = `om-grafieken-${new Date().toISOString().slice(0,10)}.png`;
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+          URL.revokeObjectURL(url);
+        };
+        img.src = url;
+      };
+
+      const mRol   = count(medewerkers, 'diag_rol',   DIAG_A[0].opts);
+      const mOri   = count(medewerkers, 'diag_ori',   DIAG_A[1].opts);
+      const mEigen = count(medewerkers, 'diag_eigen', DIAG_A[2].opts);
+      const mToon  = count(medewerkers, 'diag_toon',  DIAG_A[4].opts);
+      const sKent  = count(stakeholders,'diag_kent',  DIAG_B[0].opts);
+      const sReact = count(stakeholders,'diag_react', DIAG_B[1].opts);
+      const sToon  = count(stakeholders,'diag_toon',  DIAG_B[2].opts);
+
+      const total = medewerkers.length + stakeholders.length;
+
+      return (
+        <div className="fade-in">
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+            <div style={{ fontSize:13, color:C.mid }}>{total} gesprekken · {medewerkers.length} medewerkers · {stakeholders.length} stakeholders</div>
+            <button style={S.btnS} onClick={exportCharts}>⬇ Exporteer als PNG</button>
+          </div>
+
+          <div ref={chartRef} style={{ background:C.cream, padding:24, borderRadius:12, border:`1px solid ${C.border}` }}>
+            {/* Overzicht */}
+            <div style={{ fontFamily:"'Lora',serif", fontSize:16, fontWeight:700, color:C.navy, marginBottom:20, paddingBottom:10, borderBottom:`2px solid ${C.border}` }}>
+              OM Parket Den Haag — Gesprekken overzicht
+            </div>
+
+            {/* Type verdeling */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))', gap:24, marginBottom:32 }}>
+              <DonutChart title="Type gesprekken" size={130} data={[
+                { label:'Medewerkers', value:medewerkers.length, color:C.navyLt },
+                { label:'Stakeholders', value:stakeholders.length, color:C.gold },
+              ]} />
+              {medewerkers.length > 0 && <DonutChart title="Rolduidelijkheid" size={130} data={DIAG_A[0].opts.map((o,i) => ({ label:o, value:mRol[i], color:DIAG_A[0].colors[i] }))} />}
+              {medewerkers.length > 0 && <DonutChart title="Oriëntatie" size={130} data={DIAG_A[1].opts.map((o,i) => ({ label:o, value:mOri[i], color:DIAG_A[1].colors[i] }))} />}
+              {medewerkers.length > 0 && <DonutChart title="Eigenaarschap" size={130} data={DIAG_A[2].opts.map((o,i) => ({ label:o, value:mEigen[i], color:DIAG_A[2].colors[i] }))} />}
+              {medewerkers.length > 0 && <DonutChart title="Toon medewerkers" size={130} data={DIAG_A[4].opts.map((o,i) => ({ label:o, value:mToon[i], color:DIAG_A[4].colors[i] }))} />}
+              {stakeholders.length > 0 && <DonutChart title="Kent afdeling?" size={130} data={DIAG_B[0].opts.map((o,i) => ({ label:o, value:sKent[i], color:DIAG_B[0].colors[i] }))} />}
+              {stakeholders.length > 0 && <DonutChart title="Reactief/Pro-actief" size={130} data={DIAG_B[1].opts.map((o,i) => ({ label:o, value:sReact[i], color:DIAG_B[1].colors[i] }))} />}
+              {stakeholders.length > 0 && <DonutChart title="Toon stakeholders" size={130} data={DIAG_B[2].opts.map((o,i) => ({ label:o, value:sToon[i], color:DIAG_B[2].colors[i] }))} />}
+            </div>
+
+            {/* Staafdiagram per cluster */}
+            {medewerkers.length > 0 && (() => {
+              const clusters = [...new Set(medewerkers.map(g => g.cluster).filter(Boolean))];
+              if (clusters.length < 2) return null;
+              return (
+                <div style={{ marginBottom:24 }}>
+                  <BarChart title="Rolduidelijkheid per cluster" groups={clusters.map(cl => {
+                    const m = medewerkers.filter(g => g.cluster === cl);
+                    return { label:cl, values:DIAG_A[0].opts.map(o => m.filter(g => g.diag_rol===o).length), colors:DIAG_A[0].colors };
+                  })} />
+                </div>
+              );
+            })()}
+
+            {/* Legenda */}
+            <div style={{ display:'flex', gap:16, flexWrap:'wrap', paddingTop:12, borderTop:`1px solid ${C.border}` }}>
+              {[[C.green,'Positief/Sterk/Helder'],[C.orange,'Wisselend/Gemengd/Vaag'],[C.red,'Zorgelijk/Laag']].map(([col,lbl]) => (
+                <div key={lbl} style={{ display:'flex', alignItems:'center', gap:5, fontSize:10, color:C.mid }}>
+                  <div style={{ width:10, height:10, borderRadius:2, background:col }}/>
+                  {lbl}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       );
     }
