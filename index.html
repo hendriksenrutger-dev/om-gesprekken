@@ -600,43 +600,68 @@
       const exportCharts = () => {
         const el = chartRef.current;
         if (!el) return;
-        const canvas = document.createElement('canvas');
-        const scale = 2;
-        canvas.width = el.offsetWidth * scale;
-        canvas.height = el.offsetHeight * scale;
-        const ctx = canvas.getContext('2d');
-        ctx.scale(scale, scale);
-        ctx.fillStyle = '#F6F2EA';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Use html2canvas-like approach via SVG foreignObject
-        const data = new XMLSerializer().serializeToString(
-          (() => {
-            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-            svg.setAttribute('width', el.offsetWidth);
-            svg.setAttribute('height', el.offsetHeight);
-            const fo = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
-            fo.setAttribute('width', '100%');
-            fo.setAttribute('height', '100%');
-            const div = document.createElement('div');
-            div.innerHTML = el.outerHTML;
-            fo.appendChild(div);
-            svg.appendChild(fo);
-            return svg;
-          })()
-        );
-        const blob = new Blob([data], { type: 'image/svg+xml' });
+        // Collect all SVG chart content
+        const svgs = el.querySelectorAll('svg');
+        let svgHTML = '';
+        svgs.forEach(svg => { svgHTML += svg.outerHTML; });
+
+        const html = `<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>OM Gesprekken — Grafieken</title>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: #fff; color: #1C1C1C; padding: 32px; }
+  h1 { font-family: 'Lora', serif; font-size: 22px; color: #1A3057; margin-bottom: 4px; }
+  .sub { font-size: 12px; color: #888; margin-bottom: 28px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 32px; margin-bottom: 32px; }
+  .chart { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 140px; }
+  .chart-title { font-family: 'Lora', serif; font-size: 13px; font-weight: 700; color: #1A3057; text-align: center; }
+  .legend { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+  .dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  .bar-section { margin-bottom: 28px; }
+  .bar-title { font-family: 'Lora', serif; font-size: 14px; font-weight: 700; color: #1A3057; margin-bottom: 12px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .bar-label { font-size: 11px; font-weight: 600; color: #1A3057; width: 100px; text-align: right; flex-shrink: 0; }
+  .bar-track { flex: 1; display: flex; height: 22px; border-radius: 4px; overflow: hidden; gap: 1px; }
+  .bar-seg { display: flex; align-items: center; justify-content: center; }
+  .bar-seg span { font-size: 9px; font-weight: 700; color: white; }
+  .bar-total { font-size: 10px; color: #888; width: 20px; text-align: right; }
+  .footer { display: flex; gap: 16px; flex-wrap: wrap; padding-top: 16px; border-top: 1px solid #D5CFBF; margin-top: 8px; }
+  .footer-item { display: flex; align-items: center; gap: 5px; font-size: 10px; color: #888; }
+  @media print { body { padding: 20px; } }
+</style>
+</head>
+<body>
+<h1>OM Parket Den Haag — Gesprekken overzicht</h1>
+<div class="sub">Gegenereerd op ${new Date().toLocaleDateString('nl-NL', { day:'numeric', month:'long', year:'numeric' })} · ${medewerkers.length} medewerkers · ${stakeholders.length} stakeholders</div>
+${el.innerHTML}
+<script>
+  // Auto-open print dialog
+  window.onload = function() {
+    // Small delay to let fonts load
+    setTimeout(function() { window.print(); }, 800);
+  };
+<\/script>
+</body>
+</html>`;
+
+        const blob = new Blob([html], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
-        const img = new Image();
-        img.onload = () => {
-          ctx.drawImage(img, 0, 0, el.offsetWidth, el.offsetHeight);
-          const link = document.createElement('a');
-          link.download = `om-grafieken-${new Date().toISOString().slice(0,10)}.png`;
-          link.href = canvas.toDataURL('image/png');
-          link.click();
-          URL.revokeObjectURL(url);
-        };
-        img.src = url;
+        const win = window.open(url, '_blank');
+        if (!win) {
+          // Fallback if popup blocked
+          const a = document.createElement('a');
+          a.href = url;
+          a.target = '_blank';
+          a.click();
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
       };
 
       const mRol   = count(medewerkers, 'diag_rol',   DIAG_A[0].opts);
@@ -653,7 +678,7 @@
         <div className="fade-in">
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
             <div style={{ fontSize:13, color:C.mid }}>{total} gesprekken · {medewerkers.length} medewerkers · {stakeholders.length} stakeholders</div>
-            <button style={S.btnS} onClick={exportCharts}>⬇ Exporteer als PNG</button>
+            <button style={S.btnS} onClick={exportCharts}>🖨 Exporteer / Print</button>
           </div>
 
           <div ref={chartRef} style={{ background:C.cream, padding:24, borderRadius:12, border:`1px solid ${C.border}` }}>
