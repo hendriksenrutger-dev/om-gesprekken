@@ -132,11 +132,35 @@
       { id:'diag_toon',  label:'Toon gesprek',                  opts:['Positief','Neutraal','Kritisch'],  colors:['#2D6A4F','#666','#8B1A1A'] },
     ];
 
+    const TPL_PL = [
+      { id:'strat', title:'01 · Strategische positie B&S', hint:"Geef ruimte — deze vragen zijn waarschijnlijk nog nooit zo gesteld. Als het antwoord vaag is: 'Wat zou het parket concreet missen als B&S er niet was?'", fields:[
+        { id:'pl_waarom',  label:'Waarom bestaat B&S — wat voegt de afdeling toe aan het parket?', rows:4 },
+        { id:'pl_missen',  label:'Wat zou het parket missen als B&S er niet was?', rows:3 },
+        { id:'pl_rol',     label:'Wat is de strategische functie die u van B&S verwacht — niet de taken, maar de rol?', rows:4 },
+      ]},
+      { id:'mandaat', title:'02 · Mandaat en bevoegdheden', hint:'Zonder mandaat kan B&S niet pro-actief zijn. Dit bepaalt of verandering ook echt mogelijk is.', fields:[
+        { id:'pl_bevoegd',  label:'Welke bevoegdheden en welk mandaat heeft B&S nodig om die rol waar te maken?', rows:4 },
+        { id:'pl_grenzen',  label:'Waar liggen de grenzen — wat valt buiten het mandaat van B&S?', rows:3 },
+        { id:'pl_verhouding', label:'Hoe verhoudt B&S zich tot andere afdelingen die raakvlakken hebben met deze rol?', rows:3 },
+      ]},
+      { id:'resultaat', title:'03 · Gewenst resultaat', hint:'', fields:[
+        { id:'pl_succes',  label:'Wat zou u over een jaar zien dat u vertelt dat het gelukt is?', rows:4 },
+        { id:'pl_verschil', label:'Wat is het verschil tussen B&S nu en B&S zoals u het voor ogen heeft?', rows:4 },
+        { id:'pl_weten',   label:'Zijn er zaken die u heeft gehoord of gezien die ik moet weten voor mijn diagnose?', rows:3 },
+      ]},
+    ];
+
+    const DIAG_PL = [
+      { id:'diag_pl_strat',  label:'Strategische functie benoemd?', opts:['Helder','Deels','Niet'],    colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_pl_mandaat', label:'Mandaat expliciet?',           opts:['Ja','Deels','Nee'],          colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_pl_toon',   label:'Toon gesprek',                  opts:['Positief','Neutraal','Kritisch'], colors:['#2D6A4F','#666','#8B1A1A'] },
+    ];
+
     const uid = () => Math.random().toString(36).slice(2,10);
 
     function gesprekToText(g) {
-      const sections = g.type === 'medewerker' ? TPL_A : TPL_B;
-      const diags    = g.type === 'medewerker' ? DIAG_A : DIAG_B;
+      const sections = g.type === 'medewerker' ? TPL_A : g.type === 'parketleiding' ? TPL_PL : TPL_B;
+      const diags    = g.type === 'medewerker' ? DIAG_A : g.type === 'parketleiding' ? DIAG_PL : DIAG_B;
       let t = `=== ${g.type.toUpperCase()}: ${g.naam}${g.functie ? ` (${g.functie})` : ''}${g.cluster ? ` · ${g.cluster}` : ''} · ${g.datum} ===\n\n`;
       sections.forEach(s => {
         const body = s.fields.filter(f => g[f.id]?.trim()).map(f => `  ${f.label}:\n  ${g[f.id]}`).join('\n\n');
@@ -144,8 +168,11 @@
       });
       const diag = diags.filter(f => g[f.id]).map(f => `${f.label}: ${g[f.id]}`).join('  |  ');
       if (diag) t += `Diagnose: ${diag}\n`;
-      if (g.frustratie) t += `Frustratie: ${g.frustratie}\n`;
+      if (g.spontaan) t += `Spontaan genoemd: ${g.spontaan}\n`;
+      if (g.regels) t += `Tussen de regels: ${g.regels}\n`;
       if (g.kernbev) t += `Kernbevindingen: ${g.kernbev}\n`;
+      if (g.ontbreekt) t += `Wat ontbreekt nog: ${g.ontbreekt}\n`;
+      if (g.frustratie) t += `Frustratie: ${g.frustratie}\n`;
       return t;
     }
 
@@ -185,7 +212,9 @@
     }
 
     function TypeBadge({ type }) {
-      return <span style={S.pill(type === 'medewerker' ? C.navyLt : C.gold)}>{type === 'medewerker' ? 'Medewerker' : 'Stakeholder'}</span>;
+      const color = type === 'medewerker' ? C.navyLt : type === 'parketleiding' ? C.green : C.gold;
+      const label = type === 'medewerker' ? 'Medewerker' : type === 'parketleiding' ? 'Parketleiding' : 'Stakeholder';
+      return <span style={S.pill(color)}>{label}</span>;
     }
 
     function Accordion({ title, hint, open, onToggle, children }) {
@@ -267,7 +296,7 @@
             const diags = g.type === 'medewerker' ? DIAG_A : DIAG_B;
             return (
               <div key={g.id} onClick={() => onEdit(g.id)}
-                style={{ ...S.card, borderLeft:`3px solid ${g.type==='medewerker' ? C.navyLt : C.gold}` }}
+                style={{ ...S.card, borderLeft:`3px solid ${g.type==='medewerker' ? C.navyLt : g.type==='parketleiding' ? C.green : C.gold}` }}
                 onMouseEnter={e => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'}
                 onMouseLeave={e => e.currentTarget.style.boxShadow='0 1px 4px rgba(0,0,0,0.04)'}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
@@ -307,8 +336,8 @@
       const [open, setOpen] = useState({ p:true });
       const set = (k, v) => setData(d => ({ ...d, [k]:v }));
       const toggle = id => setOpen(o => ({ ...o, [id]:!o[id] }));
-      const sections = data.type === 'medewerker' ? TPL_A : TPL_B;
-      const diagFields = data.type === 'medewerker' ? DIAG_A : DIAG_B;
+      const sections = data.type === 'medewerker' ? TPL_A : data.type === 'parketleiding' ? TPL_PL : TPL_B;
+      const diagFields = data.type === 'medewerker' ? DIAG_A : data.type === 'parketleiding' ? DIAG_PL : DIAG_B;
 
       return (
         <div className="fade-in">
@@ -320,11 +349,11 @@
           {/* Basisgegevens */}
           <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20, marginBottom:16 }}>
             <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:16 }}>Basisgegevens</div>
-            <div style={{ display:'flex', gap:8, marginBottom:16 }}>
-              {['medewerker','stakeholder'].map(t => (
+            <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
+              {[['medewerker','👤 Medewerker'],['stakeholder','🤝 Stakeholder'],['parketleiding','🏛 Parketleiding']].map(([t,lbl]) => (
                 <button key={t} onClick={() => set('type',t)}
-                  style={{ flex:1, padding:'10px', borderRadius:8, border:`2px solid ${data.type===t ? C.navy : C.border}`, background: data.type===t ? C.navy : C.white, color: data.type===t ? C.white : C.mid, fontWeight:600, fontSize:13, cursor:'pointer', transition:'all 0.15s' }}>
-                  {t === 'medewerker' ? '👤 Medewerker' : '🤝 Stakeholder'}
+                  style={{ flex:1, minWidth:120, padding:'10px', borderRadius:8, border:`2px solid ${data.type===t ? C.navy : C.border}`, background: data.type===t ? C.navy : C.white, color: data.type===t ? C.white : C.mid, fontWeight:600, fontSize:13, cursor:'pointer', transition:'all 0.15s' }}>
+                  {lbl}
                 </button>
               ))}
             </div>
@@ -366,9 +395,29 @@
               <div style={{ flex:1 }}><input style={S.inp} value={data.frustratie||''} onChange={e => set('frustratie',e.target.value)} /></div>
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              <label style={S.label}>Spontaan genoemd</label>
+              <textarea style={S.ta} rows={2} value={data.spontaan||''} onChange={e => set('spontaan',e.target.value)} />
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              <label style={S.label}>Tussen de regels</label>
+              <textarea style={S.ta} rows={2} value={data.regels||''} onChange={e => set('regels',e.target.value)} />
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
               <label style={S.label}>Kernbevindingen</label>
               <textarea style={S.ta} rows={3} value={data.kernbev||''} onChange={e => set('kernbev',e.target.value)} />
             </div>
+            {data.type === 'parketleiding' && (
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                <label style={S.label}>Wat ontbreekt nog — wat moet doorgevraagd worden</label>
+                <textarea style={S.ta} rows={2} value={data.ontbreekt||''} onChange={e => set('ontbreekt',e.target.value)} />
+              </div>
+            )}
+            {data.type !== 'parketleiding' && (
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                <label style={S.label}>Frustratie over</label>
+                <input style={S.inp} value={data.frustratie||''} onChange={e => set('frustratie',e.target.value)} />
+              </div>
+            )}
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
               <label style={S.label}>Follow-up / actiepunten</label>
               <textarea style={S.ta} rows={2} value={data.followup||''} onChange={e => set('followup',e.target.value)} />
@@ -395,6 +444,11 @@
       { key:'diag_react', label:'Reac.', field:DIAG_B[1] },
       { key:'diag_toon',  label:'Toon',  field:DIAG_B[2] },
     ];
+    const MCOLS_PL = [
+      { key:'diag_pl_strat',   label:'Strat.', field:DIAG_PL[0] },
+      { key:'diag_pl_mandaat', label:'Mand.',  field:DIAG_PL[1] },
+      { key:'diag_pl_toon',    label:'Toon',   field:DIAG_PL[2] },
+    ];
 
     function contextToText(items) {
       if (!items || items.length === 0) return '';
@@ -411,6 +465,7 @@
 
       const medewerkers  = gesprekken.filter(g => g.type==='medewerker');
       const stakeholders = gesprekken.filter(g => g.type==='stakeholder');
+      const parketleiding = gesprekken.filter(g => g.type==='parketleiding');
 
       const getColor = (g, key, field) => {
         const val = g[key]; if (!val || !field) return C.creamDk;
@@ -502,6 +557,12 @@
                   </div>
                 </div>
               )}
+              {parketleiding.length > 0 && (
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20, marginBottom:16 }}>
+                  <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:14 }}>Parketleiding ({parketleiding.length})</div>
+                  <MatrixTable rows={parketleiding} cols={MCOLS_PL} />
+                </div>
+              )}
               {stakeholders.length > 0 && (
                 <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20 }}>
                   <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:14 }}>Stakeholders ({stakeholders.length})</div>
@@ -511,7 +572,7 @@
             </div>
           )}
 
-          {tab === 'grafieken' && <GrafiekenView medewerkers={medewerkers} stakeholders={stakeholders} />}
+          {tab === 'grafieken' && <GrafiekenView medewerkers={medewerkers} stakeholders={stakeholders} parketleiding={parketleiding} />}
 
           {tab === 'ai' && (
             <div className="fade-in">
@@ -1306,7 +1367,7 @@ De notitie is input voor het DECIDE-moment met de hoofdofficier. Geen acties voo
             <div style={S.hdrIn}>
               <div>
                 <div style={S.title}>OM Gesprekken</div>
-                <div style={S.sub}>{gesprekken.length} gesprekken · {gesprekken.filter(g=>g.type==='medewerker').length}M · {gesprekken.filter(g=>g.type==='stakeholder').length}S{bronnen.length > 0 ? ` · ${bronnen.length} bronnen` : ''}</div>
+                <div style={S.sub}>{gesprekken.length} gesprekken · {gesprekken.filter(g=>g.type==='medewerker').length}M · {gesprekken.filter(g=>g.type==='stakeholder').length}S · {gesprekken.filter(g=>g.type==='parketleiding').length}PL{bronnen.length > 0 ? ` · ${bronnen.length} bronnen` : ''}</div>
               </div>
               {view !== 'form' && (
                 <nav style={S.nav}>
