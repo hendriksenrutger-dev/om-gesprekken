@@ -601,12 +601,13 @@
         const el = chartRef.current;
         if (!el) return;
 
-        // Collect all SVG chart content
-        const svgs = el.querySelectorAll('svg');
-        let svgHTML = '';
-        svgs.forEach(svg => { svgHTML += svg.outerHTML; });
+        const win = window.open('', '_blank');
+        if (!win) {
+          alert('Pop-up geblokkeerd. Sta pop-ups toe voor deze site en probeer opnieuw.');
+          return;
+        }
 
-        const html = `<!DOCTYPE html>
+        win.document.write(`<!DOCTYPE html>
 <html lang="nl">
 <head>
 <meta charset="UTF-8"/>
@@ -615,53 +616,22 @@
 <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Inter', sans-serif; background: #fff; color: #1C1C1C; padding: 32px; }
+  body { font-family: 'Inter', sans-serif; background: #fff; color: #1C1C1C; padding: 40px; max-width: 960px; margin: 0 auto; }
   h1 { font-family: 'Lora', serif; font-size: 22px; color: #1A3057; margin-bottom: 4px; }
-  .sub { font-size: 12px; color: #888; margin-bottom: 28px; }
-  .grid { display: flex; flex-wrap: wrap; gap: 32px; margin-bottom: 32px; }
-  .chart { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 140px; }
-  .chart-title { font-family: 'Lora', serif; font-size: 13px; font-weight: 700; color: #1A3057; text-align: center; }
-  .legend { display: flex; flex-direction: column; gap: 4px; width: 100%; }
-  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; }
-  .dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
-  .bar-section { margin-bottom: 28px; }
-  .bar-title { font-family: 'Lora', serif; font-size: 14px; font-weight: 700; color: #1A3057; margin-bottom: 12px; }
-  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  .bar-label { font-size: 11px; font-weight: 600; color: #1A3057; width: 100px; text-align: right; flex-shrink: 0; }
-  .bar-track { flex: 1; display: flex; height: 22px; border-radius: 4px; overflow: hidden; gap: 1px; }
-  .bar-seg { display: flex; align-items: center; justify-content: center; }
-  .bar-seg span { font-size: 9px; font-weight: 700; color: white; }
-  .bar-total { font-size: 10px; color: #888; width: 20px; text-align: right; }
-  .footer { display: flex; gap: 16px; flex-wrap: wrap; padding-top: 16px; border-top: 1px solid #D5CFBF; margin-top: 8px; }
-  .footer-item { display: flex; align-items: center; gap: 5px; font-size: 10px; color: #888; }
-  @media print { body { padding: 20px; } }
+  .sub { font-size: 12px; color: #888; margin-bottom: 32px; padding-bottom: 16px; border-bottom: 2px solid #D5CFBF; }
+  .print-btn { position: fixed; top: 20px; right: 20px; background: #1A3057; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif; }
+  .print-btn:hover { background: #2A4A7F; }
+  @media print { .print-btn { display: none; } body { padding: 20px; } }
 </style>
 </head>
 <body>
+<button class="print-btn" onclick="window.print()">🖨 Print / Sla op als PDF</button>
 <h1>OM Parket Den Haag — Gesprekken overzicht</h1>
 <div class="sub">Gegenereerd op ${new Date().toLocaleDateString('nl-NL', { day:'numeric', month:'long', year:'numeric' })} · ${medewerkers.length} medewerkers · ${stakeholders.length} stakeholders</div>
 ${el.innerHTML}
-<script>
-  // Auto-open print dialog
-  window.onload = function() {
-    // Small delay to let fonts load
-    setTimeout(function() { window.print(); }, 800);
-  };
-<\/script>
 </body>
-</html>`;
-
-        const blob = new Blob([html], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const win = window.open(url, '_blank');
-        if (!win) {
-          // Fallback if popup blocked
-          const a = document.createElement('a');
-          a.href = url;
-          a.target = '_blank';
-          a.click();
-        }
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
+</html>`);
+        win.document.close();
       };
 
       const mRol   = count(medewerkers, 'diag_rol',   DIAG_A[0].opts);
