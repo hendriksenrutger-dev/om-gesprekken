@@ -887,6 +887,54 @@ ${el.innerHTML}
         setEditingId(item.id);
       };
 
+      const pdfRef = React.useRef();
+
+      const uploadPdf = async (e) => {
+        const file = e.target.files[0];
+        if (!file || !apiKey) return;
+        e.target.value = '';
+        const label = file.name.replace('.pdf','');
+        const loadingId = uid();
+        onBronnenChange(prev => [...prev, { id: loadingId, label, tekst: '⏳ PDF wordt gelezen…' }]);
+        setEditingId(loadingId);
+
+        try {
+          const base64 = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload = () => res(r.result.split(',')[1]);
+            r.onerror = rej;
+            r.readAsDataURL(file);
+          });
+
+          const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'anthropic-dangerous-direct-browser-access': 'true',
+            },
+            body: JSON.stringify({
+              model: 'claude-sonnet-4-5',
+              max_tokens: 4000,
+              messages: [{
+                role: 'user',
+                content: [
+                  { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+                  { type: 'text', text: 'Extraheer de volledige tekst uit dit document. Geef alleen de tekst terug, geen commentaar of samenvatting. Behoud de structuur zo goed mogelijk.' }
+                ]
+              }]
+            })
+          });
+          const data = await response.json();
+          if (data.error) throw new Error(data.error.message);
+          const tekst = data.content?.map(b => b.text || '').join('\n') || '';
+          onBronnenChange(prev => prev.map(b => b.id === loadingId ? { ...b, tekst } : b));
+        } catch(err) {
+          onBronnenChange(prev => prev.map(b => b.id === loadingId ? { ...b, tekst: `Fout bij lezen PDF: ${err.message}` } : b));
+        }
+      };
+
       const updateBron = (id, field, val) => {
         onBronnenChange(bronnen.map(b => b.id === id ? { ...b, [field]: val } : b));
       };
@@ -895,29 +943,35 @@ ${el.innerHTML}
         if (window.confirm('Dit bronblok verwijderen?')) onBronnenChange(bronnen.filter(b => b.id !== id));
       };
 
-      const TRAJECT_CONTEXT = `Achtergrond: het afdelingshoofd werkt volgens een gefaseerd ontwikkeltraject gebaseerd op de T&G-methodiek voor OM Parket Den Haag. De afdeling heeft vijf clusters: beleidsondersteuning & advies, gebiedsgericht werken, intelligence & ondermijning, communicatie, en bureau juridische zaken. Eén teamleider. Geen clustercoördinatoren.
+      const SYS = `Je helpt een nieuw afdelingshoofd bij OM Parket Den Haag een diagnose stellen en een notitie schrijven. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal.
+
+Achtergrond: het afdelingshoofd werkt volgens een gefaseerd ontwikkeltraject gebaseerd op de T&G-methodiek voor OM Parket Den Haag. De afdeling heeft vijf clusters: beleidsondersteuning & advies, gebiedsgericht werken, intelligence & ondermijning, communicatie, en bureau juridische zaken. Eén teamleider. Geen clustercoördinatoren.
 
 Het traject kent 5 fasen:
-- Fase 0: Mandate ophalen bij hoofdofficier (wat is de opdracht, wat zijn de grenzen)
+- Fase 0: Mandate ophalen bij hoofdofficier
 - Fase 1: Diagnose — kennismakingsgesprekken intern en extern, patroonanalyse, bevindingsnotitie
 - Fase 2: Clusters voeren stakeholdergesprekken binnen kaders van het afdelingshoofd
 - Fase 3: Afdelingsdocument — missie, leidende principes, rolverwachtingen per cluster
 - Fase 4: Borging — overlegstructuur, gedragsindicatoren, bijsturing na 6 maanden
 
 Na fase 1 volgt een DECIDE-moment met de hoofdofficier op basis van drie scenario's:
-- Scenario A: volledig traject — rolduidelijkheid structureel vaag bij meerdere clusters, stakeholders bevestigen dat de afdeling niet levert wat nodig is
-- Scenario B: gericht traject — 1-2 clusters hebben gerichte problemen, andere clusters functioneren voldoende
-- Scenario C: klein traject — problemen beperkt en incidenteel, geen structurele disfunctie
+- Scenario A: volledig traject
+- Scenario B: gericht traject
+- Scenario C: klein traject
 
-De diagnose en notitie zijn input voor dit DECIDE-moment. Ze moeten de hoofdofficier en het afdelingshoofd in staat stellen een gefundeerde keuze te maken over welk scenario past.
+Analytisch kader — verwerk dit altijd in de diagnose:
 
-Veranderopgave zoals benoemd door de leiding: rolduidelijkheid, pro-actiever werken, beter aansluiten bij behoeften van officieren en andere stakeholders.`;
+1. Het probleem ligt niet alleen bij B&S maar ook bij hoe het parket B&S aanstuurt. De sturingsverantwoordelijkheid van de parketleiding is onderdeel van de diagnose — niet alleen intern falen van de afdeling. Dit krijgt een prominente positie, niet een voetnoot.
 
-      const SYS = `Je helpt een nieuw afdelingshoofd bij OM Parket Den Haag een diagnose stellen en een notitie schrijven. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal.
+2. De volgorde is altijd: eerst definiëren waarvoor B&S bestaat (conceptueel), dan pas beoordelen of de inrichting klopt (structureel). Nooit andersom.
 
-${TRAJECT_CONTEXT}
+3. De centrale hypothese is: B&S geeft focus aan het parket — soms leidend, soms dienend. Dit is een hypothese die getoetst wordt via de gesprekken, geen vaststaande conclusie. Introduceer het niet als feit maar laat het bevestigd of ontkracht worden door wat mensen zeggen.
 
-Belangrijk: stel geen acties voor die buiten het traject vallen. Verwijs niet naar gesprekken voeren, sessies organiseren of andere interventies — die komen in latere fasen. De diagnose en notitie zijn analysedocumenten, geen interventieplannen.`;
+4. De diagnose meet effect, niet inspanning. Niet hoeveel overleggen of klachten afgehandeld — maar of het parket er beter van wordt.
+
+5. De diagnose sluit altijd af met expliciete toetsvragen: wat moet aan het einde van fase 1 beantwoord zijn dat nu nog onbekend is?
+
+Belangrijk: stel geen acties voor die buiten het traject vallen. De diagnose is een analysedocument, geen interventieplan.`;
 
       const buildPrompt = () => {
         const gesprekkenText = gesprekken.map(gesprekToText).join('\n\n');
@@ -933,19 +987,28 @@ ${bronText ? `\n\n## AANVULLENDE BRONNEN EN EIGEN OBSERVATIES\n\n${bronText}` : 
 
 Schrijf een diagnose. Niet een opsomming van wat mensen zeggen — maar een redenering over wat er structureel mis is en waarom. Gebruik de gesprekken en bronnen als bewijs voor de redenering, niet als inhoud op zichzelf.
 
+Volg het analytisch kader uit de systeeminstructie. Dat betekent:
+- Begin met de conceptuele vraag: waarvoor bestaat B&S?
+- Geef de sturingsverantwoordelijkheid van de parketleiding een prominente positie
+- Behandel de hypothese over leidend/dienend als hypothese, niet als feit
+- Meet effect, niet inspanning
+
 **Wat structureel niet klopt**
-Benoem 3-5 fundamentele disfuncties. Geen gedragssymptomen maar oorzaken. Wat ontbreekt, wat klopt niet in de inrichting, wat werkt structureel tegen? Per punt: waarom is dit zo, wat houdt het in stand?
+Benoem 3-5 fundamentele disfuncties met oorzaken. Wat ontbreekt, wat klopt niet in de inrichting, wat werkt structureel tegen — inclusief de rol van de parketleiding daarin?
 
 **De paradoxen**
-Benoem 2-3 spanningen die de kern van het probleem raken — dingen die tegelijk waar zijn en elkaar tegenwerken. Paradoxen zijn diagnostisch waardevoller dan problemen.
+Benoem 2-3 spanningen die de kern van het probleem raken.
 
 **Wat dit zegt over de afdeling als geheel**
-Wat is het dominante patroon? Hoe verhouden de clusters zich tot elkaar en tot de buitenwereld? Wat is de cultuur — niet in termen van sfeer maar in termen van hoe de afdeling zichzelf definieert en positioneert?
+Dominante patroon, cultuur, hoe de afdeling zichzelf positioneert.
 
 **Kern van de opgave**
-4-6 zinnen. Wat is de essentie van wat er mis is? Niet wat er moet veranderen — maar wat de werkelijke diagnose is.
+4-6 zinnen. Wat is de werkelijke diagnose?
 
-Geen actiepunten. Geen "ga met X in gesprek". Geen voorstellen. Dit is een diagnose.`;
+**Toetsvragen voor fase 1**
+Wat moet nog beantwoord worden voor het DECIDE-moment? Formuleer als open vragen, niet als acties.
+
+Geen actiepunten. Geen "ga met X in gesprek". Dit is een diagnose.`;
       };
 
       const generate = async () => {
@@ -970,24 +1033,23 @@ Geen actiepunten. Geen "ga met X in gesprek". Geen voorstellen. Dit is een diagn
       const chat = async () => {
         if (!input.trim() || !diagnose || !apiKey) return;
         setChatLoading(true);
-        const userMsg = { role:'user', content: input };
-        const contextMsg = { role:'user', content: `De huidige diagnose is:\n\n${diagnose}\n\nVraag: ${input}` };
-        const msgs = [contextMsg];
+        const vraag = input;
+        const contextMsg = { role:'user', content: `De huidige diagnose is:\n\n${diagnose}\n\nVraag: ${vraag}` };
         try {
-          const result = await claude(msgs, SYS, apiKey);
-          setChatHistory(prev => [...prev, { vraag: input, antwoord: result }]);
+          const result = await claude([contextMsg], SYS, apiKey);
+          setChatHistory(prev => [...prev, { id: uid(), vraag, antwoord: result }]);
           setInput('');
         } catch(e) { setErr(e.message); }
         setChatLoading(false);
       };
 
-      const incorporeer = async (antwoord) => {
+      const incorporeer = async (antwoord, itemId) => {
         setLoading(true);
         const prompt = `Dit is de huidige diagnose:\n\n${diagnose}\n\nDit is een aanvulling of correctie die verwerkt moet worden:\n\n${antwoord}\n\nPas de diagnose gericht aan op basis van deze aanvulling. Herschrijf alleen wat relevant verandert — behoud de rest zoals het is. Geen nieuwe structuur, geen nieuwe opzet.`;
         try {
           const result = await claude([{ role:'user', content: prompt }], SYS, apiKey);
           saveDiagnose(result);
-          setChatHistory([]);
+          setChatHistory(prev => prev.filter(item => item.id !== itemId));
         } catch(e) { setErr(e.message); }
         setLoading(false);
       };
@@ -1054,6 +1116,11 @@ Geen actiepunten. Geen "ga met X in gesprek". Geen voorstellen. Dit is een diagn
                   style={{ padding:'6px 12px', borderRadius:20, border:`1.5px solid ${C.border}`, background:C.white, color:C.mid, fontSize:11, cursor:'pointer' }}>
                   + Eigen label
                 </button>
+                <button onClick={() => pdfRef.current.click()}
+                  style={{ padding:'6px 12px', borderRadius:20, border:`1.5px solid ${C.orange}`, background:C.white, color:C.orange, fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                  📄 Upload PDF
+                </button>
+                <input ref={pdfRef} type="file" accept="application/pdf" style={{ display:'none' }} onChange={uploadPdf} />
               </div>
             </div>
           </div>
@@ -1094,11 +1161,11 @@ Geen actiepunten. Geen "ga met X in gesprek". Geen voorstellen. Dit is een diagn
                           {item.antwoord}
                         </div>
                         <div style={{ display:'flex', gap:8, marginTop:6 }}>
-                          <button onClick={() => incorporeer(item.antwoord)} disabled={loading}
+                          <button onClick={() => incorporeer(item.antwoord, item.id)} disabled={loading}
                             style={{ ...S.btnS, fontSize:11, padding:'5px 12px', color:C.green, borderColor:C.green }}>
                             {loading ? <Spinner /> : '↳ Verwerk in diagnose'}
                           </button>
-                          <button onClick={() => setChatHistory(prev => prev.filter((_,j) => j !== i))}
+                          <button onClick={() => setChatHistory(prev => prev.filter(c => c.id !== item.id))}
                             style={{ background:'none', border:'none', cursor:'pointer', fontSize:11, color:C.light }}>
                             verwijder
                           </button>
@@ -1148,16 +1215,17 @@ Geen actiepunten. Geen "ga met X in gesprek". Geen voorstellen. Dit is een diagn
         try { localStorage.setItem('om-diagnose-notitie', n); } catch {}
       };
 
-      const SYS_NOTITIE = `Je schrijft een sturingsdocument voor een nieuw afdelingshoofd bij OM Parket Den Haag. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal.
+      const SYS_NOTITIE = `Je schrijft een bevindingsnotitie voor een nieuw afdelingshoofd bij OM Parket Den Haag. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal, geen overbodige opsmuk. Maximaal 1 A4.
 
-De afdeling heeft vijf clusters: beleidsondersteuning & advies, gebiedsgericht werken, intelligence & ondermijning, communicatie, en bureau juridische zaken. Eén teamleider, geen clustercoördinatoren.
+De notitie volgt altijd deze volgorde: eerst het conceptuele (waarvoor bestaat B&S), dan pas het structurele (of de inrichting klopt). Niet andersom.
 
-Het traject kent drie scenario's na de diagnosefase:
-- Scenario A: volledig traject — rolduidelijkheid structureel vaag bij meerdere clusters, stakeholders bevestigen dat de afdeling niet levert wat nodig is
-- Scenario B: gericht traject — 1-2 clusters hebben gerichte problemen, andere clusters functioneren voldoende  
-- Scenario C: klein traject — problemen beperkt en incidenteel, geen structurele disfunctie
+De sturingsverantwoordelijkheid van de parketleiding krijgt een prominente positie — dit is geen puur intern probleem van B&S. Het parket heeft nagelaten te sturen op samenhang en aansluiting. Dat is onderdeel van de bevinding.
 
-De notitie is input voor het DECIDE-moment met de hoofdofficier. Geen acties voorstellen buiten dit kader. Geen interventieplannen.`;
+De notitie onderscheidt expliciet waar B&S leidend moet zijn (verwerving, woordvoering, informatiesturing) en waar dienend (klachtafhandeling, bestuursondersteuning, advies op verzoek). Zolang dat onderscheid niet gemaakt is, blijft de afdeling standaard reactief.
+
+De notitie sluit af met de vraag wat nog getoetst moet worden voor het DECIDE-moment met de hoofdofficier — niet als actielijst maar als open vragen die fase 1 moet beantwoorden.
+
+Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
 
       const generate = async () => {
         if (!apiKey) { setErr('Geen API-sleutel.'); return; }
