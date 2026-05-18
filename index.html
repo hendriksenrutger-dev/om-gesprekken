@@ -16,6 +16,7 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -51,6 +52,8 @@
       saveGesprekken:  (d) => { try { localStorage.setItem('om-gesprekken', JSON.stringify(d)); } catch {} },
       loadContext:     () => { try { return JSON.parse(localStorage.getItem('om-context') || '[]'); } catch { return []; } },
       saveContext:     (d) => { try { localStorage.setItem('om-context', JSON.stringify(d)); } catch {} },
+      loadOverleggen:  () => { try { return JSON.parse(localStorage.getItem('om-overleggen') || 'null'); } catch { return null; } },
+      saveOverleggen:  (d) => { try { localStorage.setItem('om-overleggen', JSON.stringify(d)); } catch {} },
       getApiKey:       () => localStorage.getItem('om-api-key') || '',
       setApiKey:       (k) => localStorage.setItem('om-api-key', k),
     };
@@ -1325,8 +1328,341 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
       );
     }
 
+    // ─── OVERLEGGEN ───────────────────────────────────────────────────────────
+    const PRIO_COLORS = { Hoog: C.red, Medium: C.orange, Laag: C.green, 'Geen prio': C.light, Nvt: C.light };
+    const TYPE_COLORS = { Intern: C.navy, Extern: C.gold, Beide: C.green };
+    const TOETS_COLORS = { Ja: C.green, Deels: C.orange, Nee: C.red };
+
+    const START_OVERLEGGEN = [
+      { naam:'Gebiedsoverleg', domein:'Inhoudelijk dossier', type:'Intern', frequentie:'Wekelijks', prioriteit:'Hoog', eigenaar:'Tineke Geertsema', relaties:['RAO','IDO'], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Afdelingsoverleg', domein:'Team & HR', type:'Intern', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Aranka van Driel', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Beleidsoverleg', domein:'Inhoudelijk dossier', type:'Intern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Hilde Stuart / Marlot van der Kolk', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'RAO', domein:'Netwerk', type:'Beide', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Thijs Berger', relaties:['Directieoverleg','PvA Instroom','Cijferoverleg','IDO'], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Cijferoverleg', domein:'Inhoudelijk dossier', type:'Beide', frequentie:'Kwartaal', prioriteit:'Geen prio', eigenaar:'Hanneke Franssen', relaties:['RAO','PvA Instroom'], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Driehoek Den Haag', domein:'Netwerk', type:'Extern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Marcel de Boer', relaties:['Strategisch vooroverleg driehoek'], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Strategisch vooroverleg driehoek', domein:'Overleg', type:'Intern', frequentie:'Maandelijks', prioriteit:'Medium', eigenaar:'Lieke Post / Marcel de Boer', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Directieoverleg', domein:'Netwerk', type:'Beide', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Voorzitters RAO', relaties:['RAO','IDO'], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'OMT AP Den Haag', domein:'Overleg', type:'Intern', frequentie:'Maandelijks', prioriteit:'Medium', eigenaar:'Thijs Berger', relaties:['RAO','PvA Instroom'], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Actualiteitenoverleg', domein:'Overleg', type:'Intern', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'Thijs Berger', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'RBO', domein:'Netwerk', type:'Extern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Hilde Stuart', relaties:['Regionaal Beleidsplan'], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Regionale Cyberdriehoek', domein:'Netwerk', type:'Extern', frequentie:'Maandelijks', prioriteit:'Medium', eigenaar:'Karlijn Scheepers', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Afstemmoment GBOs-HOvJ-ROvJs', domein:'Overleg', type:'Intern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Gebiedscluster', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'OMKP', domein:'Netwerk', type:'Extern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Hilde Stuart', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Sierteelttafel', domein:'Netwerk', type:'Extern', frequentie:'Maandelijks', prioriteit:'Laag', eigenaar:'Marianne / Quinnie', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Landelijk overleg hoofden B&S', domein:'Netwerk', type:'Extern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Thijs Berger', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Operationele weekstart', domein:'Team & HR', type:'Intern', frequentie:'Wekelijks', prioriteit:'Geen prio', eigenaar:'Aranka van Driel', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'IDO', domein:'Inhoudelijk dossier', type:'Intern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Yara Hoppenbrouwers', relaties:['RAO','IDO'], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Wekelijkse bila met hoofdofficier', domein:'Team & HR', type:'Intern', frequentie:'Wekelijks', prioriteit:'Medium', eigenaar:'Thijs Berger', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+      { naam:'Begeleidingscommissie Regionaal Beleidsplan', domein:'Netwerk', type:'Extern', frequentie:'Maandelijks', prioriteit:'Medium', eigenaar:'Hilde Stuart', relaties:['RBO'], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toets:{} },
+    ].map(o => ({ ...o, id: Math.random().toString(36).slice(2,10) }));
+
+    const TOETS_VRAGEN = [
+      { id:'resultaat', label:'Levert dit overleg een concreet resultaat op?' },
+      { id:'eigenaar',  label:'Is er een eigenaar die zich er echt aan committeert?' },
+      { id:'gemist',    label:'Zou het parket iets missen als dit overleg wegvalt?' },
+    ];
+
+    function OverleggenView({ overleggen, onOverleggenChange, apiKey }) {
+      const [tab, setTab] = useState('inventaris');
+      const [editing, setEditing] = useState(null);
+      const [aiText, setAiText] = useState('');
+      const [aiLoading, setAiLoading] = useState(false);
+      const [aiErr, setAiErr] = useState('');
+      const namen = overleggen.map(o => o.naam);
+
+      const update = (id, field, val) => onOverleggenChange(overleggen.map(o => o.id === id ? { ...o, [field]: val } : o));
+      const updateToets = (id, vId, val) => onOverleggenChange(overleggen.map(o => o.id === id ? { ...o, toets: { ...o.toets, [vId]: val } } : o));
+      const addOverleg = () => {
+        const n = { id: uid(), naam:'Nieuw overleg', domein:'Overleg', type:'Intern', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toelichting:'', toets:{} };
+        onOverleggenChange([...overleggen, n]);
+        setEditing(n.id);
+      };
+      const del = (id) => { if(window.confirm('Overleg verwijderen?')) onOverleggenChange(overleggen.filter(o => o.id !== id)); };
+
+      const toetsTotaal = (o) => {
+        const vals = Object.values(o.toets || {});
+        if (!vals.length) return null;
+        if (vals.every(v => v === 'Ja')) return 'Ja';
+        if (vals.some(v => v === 'Nee')) return 'Nee';
+        return 'Deels';
+      };
+
+      const analyzeAI = async () => {
+        if (!apiKey) { setAiErr('Geen API-sleutel.'); return; }
+        setAiLoading(true); setAiErr('');
+        const tekst = overleggen.map(o => {
+          const t = toetsTotaal(o);
+          return `${o.naam} | ${o.type} | ${o.frequentie} | Prio: ${o.prioriteit} | Eigenaar: ${o.eigenaar || '?'} | Relaties: ${o.relaties.join(', ')||'geen'} | Toetsing: ${t||'niet gedaan'}`;
+        }).join('\n');
+        try {
+          const result = await claude([{ role:'user', content:`Analyseer de overlegstructuur van afdeling B&S bij OM Parket Den Haag:\n\n${tekst}\n\nBeantwoord:\n1. Welke overleggen staan centraal — veel verbindingen, hoog risico als ze wegvallen?\n2. Welke overleggen zijn geïsoleerd — mogelijk overbodig?\n3. Waar lopen intern en extern door elkaar — rolvervaging?\n4. Welke overleggen bedienen hetzelfde doel maar zijn apart georganiseerd?\n5. Wat ontbreekt gezien de diagnosebevindingen over B&S?\n6. Welke overleggen hebben geen eigenaar of onduidelijk eigenaarschap?\n\nAnalytisch, direct, geen ambtelijke taal.` }],
+            `Je analyseert de overlegstructuur van afdeling B&S bij OM Parket Den Haag. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal. De afdeling heeft vijf clusters: beleidsondersteuning & advies, gebiedsgericht werken, intelligence & ondermijning, communicatie, en bureau juridische zaken.`,
+            apiKey);
+          setAiText(result);
+        } catch(e) { setAiErr(e.message); }
+        setAiLoading(false);
+      };
+
+      return (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:20 }}>
+            <div>
+              <div style={S.secTitle}>Overleggen</div>
+              <div style={{ fontSize:13, color:C.mid }}>{overleggen.length} overleggen</div>
+            </div>
+            <button style={S.btnP} onClick={addOverleg}>+ Nieuw overleg</button>
+          </div>
+
+          <div style={{ display:'flex', gap:8, marginBottom:20 }}>
+            {[['inventaris','📋 Inventarisatie'],['toetsing','✅ Toetsing'],['netwerk','🔗 Netwerk']].map(([id,lbl]) => (
+              <button key={id} onClick={() => setTab(id)}
+                style={{ ...S.btnS, background: tab===id ? C.navy : 'transparent', color: tab===id ? C.white : C.navy, fontSize:13 }}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          {/* ── INVENTARISATIE ── */}
+          {tab === 'inventaris' && (
+            <div className="fade-in">
+              {overleggen.map(o => (
+                <div key={o.id} style={{ background:C.white, border:`1px solid ${editing===o.id ? C.navy : C.border}`, borderRadius:10, padding:16, marginBottom:10, borderLeft:`3px solid ${TYPE_COLORS[o.type]||C.border}`, boxShadow: editing===o.id ? `0 0 0 3px rgba(26,48,87,0.1)` : '0 1px 4px rgba(0,0,0,0.04)' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom: editing===o.id ? 12 : 0 }}>
+                    <div style={{ flex:1, cursor:'pointer' }} onClick={() => setEditing(editing===o.id ? null : o.id)}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                        <span style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700 }}>{o.naam}</span>
+                        <span style={S.pill(TYPE_COLORS[o.type]||C.mid)}>{o.type}</span>
+                        <span style={S.pill(PRIO_COLORS[o.prioriteit]||C.mid)}>{o.prioriteit}</span>
+                        {toetsTotaal(o) && <span style={S.pill(TOETS_COLORS[toetsTotaal(o)]||C.mid)}>{toetsTotaal(o)}</span>}
+                      </div>
+                      <div style={{ fontSize:12, color:C.mid }}>{o.eigenaar} · {o.frequentie} · {o.domein}</div>
+                    </div>
+                    <div style={{ display:'flex', gap:6 }}>
+                      <button onClick={() => setEditing(editing===o.id ? null : o.id)}
+                        style={{ background:'none', border:'none', cursor:'pointer', color:C.navyLt, fontSize:13 }}>
+                        {editing===o.id ? '▲' : '▼'}
+                      </button>
+                      <button onClick={() => del(o.id)} style={{ background:'none', border:'none', cursor:'pointer', color:C.light, fontSize:16 }}>×</button>
+                    </div>
+                  </div>
+
+                  {editing === o.id && (
+                    <div style={{ display:'flex', flexDirection:'column', gap:10 }} className="fade-in">
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                        {[['naam','Naam'],['eigenaar','Eigenaar'],['deelnemers','Deelnemers']].map(([k,l]) => (
+                          <div key={k} style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                            <label style={{ ...S.label, fontSize:11 }}>{l}</label>
+                            <input style={{ ...S.inp, fontSize:13 }} value={o[k]||''} onChange={e => update(o.id,k,e.target.value)} />
+                          </div>
+                        ))}
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <label style={{ ...S.label, fontSize:11 }}>Domein</label>
+                          <select style={{ ...S.inp, fontSize:13 }} value={o.domein||''} onChange={e => update(o.id,'domein',e.target.value)}>
+                            {['Netwerk','Team & HR','Overleg','Inhoudelijk dossier'].map(v => <option key={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <label style={{ ...S.label, fontSize:11 }}>Type</label>
+                          <select style={{ ...S.inp, fontSize:13 }} value={o.type||''} onChange={e => update(o.id,'type',e.target.value)}>
+                            {['Intern','Extern','Beide'].map(v => <option key={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <label style={{ ...S.label, fontSize:11 }}>Frequentie</label>
+                          <select style={{ ...S.inp, fontSize:13 }} value={o.frequentie||''} onChange={e => update(o.id,'frequentie',e.target.value)}>
+                            {['Wekelijks','Tweewekelijks','Maandelijks','Kwartaal','Ad hoc','Wisselend'].map(v => <option key={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <label style={{ ...S.label, fontSize:11 }}>Prioriteit</label>
+                          <select style={{ ...S.inp, fontSize:13 }} value={o.prioriteit||''} onChange={e => update(o.id,'prioriteit',e.target.value)}>
+                            {['Hoog','Medium','Laag','Geen prio','Nvt'].map(v => <option key={v}>{v}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                        <label style={{ ...S.label, fontSize:11 }}>Doel</label>
+                        <textarea style={{ ...S.ta, fontSize:13 }} rows={2} value={o.doel||''} onChange={e => update(o.id,'doel',e.target.value)} />
+                      </div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                        <label style={{ ...S.label, fontSize:11 }}>Relaties met andere overleggen</label>
+                        <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                          {namen.filter(n => n !== o.naam).map(n => (
+                            <button key={n} onClick={() => update(o.id,'relaties', o.relaties.includes(n) ? o.relaties.filter(r=>r!==n) : [...o.relaties,n])}
+                              style={{ padding:'4px 10px', borderRadius:16, fontSize:11, border:`1.5px solid ${o.relaties.includes(n) ? C.navy : C.border}`, background: o.relaties.includes(n) ? C.navy+'18' : C.white, color: o.relaties.includes(n) ? C.navy : C.mid, cursor:'pointer' }}>
+                              {n}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <label style={{ ...S.label, fontSize:11 }}>Stand van zaken</label>
+                          <textarea style={{ ...S.ta, fontSize:13 }} rows={2} value={o.standVanZaken||''} onChange={e => update(o.id,'standVanZaken',e.target.value)} />
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <label style={{ ...S.label, fontSize:11 }}>Acties nodig</label>
+                          <textarea style={{ ...S.ta, fontSize:13 }} rows={2} value={o.actiesNodig||''} onChange={e => update(o.id,'actiesNodig',e.target.value)} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── TOETSING ── */}
+          {tab === 'toetsing' && (
+            <div className="fade-in">
+              <div style={{ fontSize:13, color:C.mid, marginBottom:16 }}>
+                Beantwoord per overleg drie toetsvragen. Groen = Ja, Oranje = Deels, Rood = Nee.
+              </div>
+              {overleggen.map(o => (
+                <div key={o.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:16, marginBottom:10, borderLeft:`3px solid ${toetsTotaal(o) ? TOETS_COLORS[toetsTotaal(o)] : C.border}` }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                    <div>
+                      <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700 }}>{o.naam}</div>
+                      <div style={{ fontSize:11, color:C.mid }}>{o.eigenaar} · {o.type}</div>
+                    </div>
+                    {toetsTotaal(o) && <span style={S.pill(TOETS_COLORS[toetsTotaal(o)]||C.mid)}>{toetsTotaal(o)}</span>}
+                  </div>
+                  {TOETS_VRAGEN.map(v => (
+                    <div key={v.id} style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:12, color:C.mid, marginBottom:4 }}>{v.label}</div>
+                      <div style={{ display:'flex', gap:6 }}>
+                        {['Ja','Deels','Nee'].map(opt => (
+                          <button key={opt} onClick={() => updateToets(o.id, v.id, o.toets?.[v.id]===opt ? undefined : opt)}
+                            style={{ padding:'5px 14px', borderRadius:16, fontSize:12, border:`1.5px solid ${o.toets?.[v.id]===opt ? TOETS_COLORS[opt] : C.border}`, background: o.toets?.[v.id]===opt ? TOETS_COLORS[opt]+'18' : C.white, color: o.toets?.[v.id]===opt ? TOETS_COLORS[opt] : C.mid, cursor:'pointer', fontWeight: o.toets?.[v.id]===opt ? 600 : 400 }}>
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ marginTop:8 }}>
+                    <label style={{ ...S.label, fontSize:11 }}>Toelichting toetsing</label>
+                    <textarea style={{ ...S.ta, fontSize:12 }} rows={2} value={o.toelichting||''} onChange={e => update(o.id,'toelichting',e.target.value)} placeholder="Optioneel — aanvulling op de scores" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── NETWERK ── */}
+          {tab === 'netwerk' && (
+            <div className="fade-in">
+              <NetworkGraph overleggen={overleggen} />
+              <div style={{ marginTop:20 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+                  <div style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.navy }}>AI-analyse overlegstructuur</div>
+                  <button style={S.btnP} onClick={analyzeAI} disabled={aiLoading}>
+                    {aiLoading ? <><Spinner /> Analyseren…</> : '🔍 Analyseer'}
+                  </button>
+                </div>
+                {aiErr && <div style={{ fontSize:13, color:C.red, marginBottom:10 }}>{aiErr}</div>}
+                {aiText && <div style={S.aiBox}>{aiText}</div>}
+                {!aiText && !aiLoading && <div style={{ fontSize:13, color:C.mid, fontStyle:'italic' }}>Klik op "Analyseer" om een AI-analyse van de overlegstructuur te genereren.</div>}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function NetworkGraph({ overleggen }) {
+      const ref = React.useRef();
+      const PRIO_SIZE = { Hoog: 18, Medium: 13, Laag: 9, 'Geen prio': 9, Nvt: 9 };
+
+      React.useEffect(() => {
+        if (!ref.current || typeof d3 === 'undefined') return;
+        const el = ref.current;
+        d3.select(el).selectAll('*').remove();
+
+        const w = el.offsetWidth || 600, h = 420;
+        const svg = d3.select(el).append('svg').attr('width', w).attr('height', h);
+        svg.append('rect').attr('width', w).attr('height', h).attr('fill', '#F6F2EA').attr('rx', 10);
+
+        const nodes = overleggen.map(o => ({ id: o.naam, type: o.type, prio: o.prioriteit, eigenaar: o.eigenaar, toets: Object.values(o.toets||{}) }));
+        const links = [];
+        overleggen.forEach(o => {
+          (o.relaties||[]).forEach(r => {
+            if (overleggen.find(x => x.naam === r)) links.push({ source: o.naam, target: r });
+          });
+        });
+
+        const sim = d3.forceSimulation(nodes)
+          .force('link', d3.forceLink(links).id(d => d.id).distance(80))
+          .force('charge', d3.forceManyBody().strength(-120))
+          .force('center', d3.forceCenter(w/2, h/2))
+          .force('collision', d3.forceCollide(d => (PRIO_SIZE[d.prio]||10) + 6));
+
+        const link = svg.append('g').selectAll('line').data(links).join('line')
+          .attr('stroke', '#D5CFBF').attr('stroke-width', 1.5);
+
+        const node = svg.append('g').selectAll('g').data(nodes).join('g').call(
+          d3.drag().on('start', (e,d) => { if(!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+            .on('drag', (e,d) => { d.fx=e.x; d.fy=e.y; })
+            .on('end', (e,d) => { if(!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; })
+        );
+
+        node.append('circle')
+          .attr('r', d => PRIO_SIZE[d.prio]||10)
+          .attr('fill', d => TYPE_COLORS[d.type]||C.navy)
+          .attr('opacity', 0.85)
+          .attr('stroke', C.white).attr('stroke-width', 1.5);
+
+        node.append('text')
+          .attr('text-anchor','middle').attr('dy','0.35em')
+          .attr('font-size', d => Math.max(7, (PRIO_SIZE[d.prio]||10) * 0.55))
+          .attr('fill', C.white).attr('font-weight','700')
+          .attr('pointer-events','none')
+          .text(d => d.id[0]);
+
+        const tooltip = d3.select(el).append('div')
+          .style('position','absolute').style('background',C.navyDk).style('color',C.white)
+          .style('padding','8px 12px').style('border-radius','8px').style('font-size','12px')
+          .style('pointer-events','none').style('opacity',0).style('max-width','200px')
+          .style('font-family',"'Inter', sans-serif").style('line-height','1.5');
+
+        node.on('mouseenter', (e,d) => {
+          const t = d.toets.length ? (d.toets.every(v=>v==='Ja') ? '✅ Ja' : d.toets.some(v=>v==='Nee') ? '❌ Nee' : '⚠ Deels') : '— niet getoetst';
+          tooltip.style('opacity',1).html(`<strong>${d.id}</strong><br/>${d.eigenaar||'geen eigenaar'}<br/>Prio: ${d.prio}<br/>Toetsing: ${t}`);
+        }).on('mousemove', e => {
+          const rect = el.getBoundingClientRect();
+          tooltip.style('left', (e.clientX - rect.left + 10)+'px').style('top', (e.clientY - rect.top - 30)+'px');
+        }).on('mouseleave', () => tooltip.style('opacity', 0));
+
+        sim.on('tick', () => {
+          link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+          node.attr('transform', d => `translate(${Math.max(20,Math.min(w-20,d.x))},${Math.max(20,Math.min(h-20,d.y))})`);
+        });
+
+        return () => sim.stop();
+      }, [overleggen]);
+
+      const legenda = [['Intern',C.navy],['Extern',C.gold],['Beide',C.green]];
+
+      return (
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, overflow:'hidden' }}>
+          <div style={{ background:C.navy, padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <span style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.white }}>Netwerkvisualisatie</span>
+            <div style={{ display:'flex', gap:12 }}>
+              {legenda.map(([lbl,col]) => (
+                <div key={lbl} style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'rgba(255,255,255,0.7)' }}>
+                  <div style={{ width:10, height:10, borderRadius:'50%', background:col }} />{lbl}
+                </div>
+              ))}
+              <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)' }}>Grootte = prioriteit · Sleep om te bewegen</span>
+            </div>
+          </div>
+          <div ref={ref} style={{ position:'relative', width:'100%', minHeight:420 }} />
+        </div>
+      );
+    }
+
     // ─── INSTELLINGEN ─────────────────────────────────────────────────────────
-    function InstellingenView({ apiKey, onSaveKey, gesprekken, bronnen, onImport }) {
+    function InstellingenView({ apiKey, onSaveKey, gesprekken, bronnen, overleggen, onImport }) {
       const [key, setKey] = useState(apiKey);
       const [saved, setSaved] = useState(false);
       const [importErr, setImportErr] = useState('');
@@ -1336,7 +1672,7 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
       const save = () => { onSaveKey(key); setSaved(true); setTimeout(() => setSaved(false), 2000); };
 
       const exportData = () => {
-        const data = { versie: 1, datum: new Date().toISOString(), gesprekken, bronnen };
+        const data = { versie: 1, datum: new Date().toISOString(), gesprekken, bronnen, overleggen };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1376,7 +1712,7 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
               Exporteer alle gesprekken en bronnen als JSON. Bewaar dit op een veilige plek — je kunt het altijd terugzetten, ook na een URL-wijziging of herinstallatie.
             </div>
             <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-              <button style={S.btnP} onClick={exportData}>⬇ Exporteer ({gesprekken.length} gesprekken)</button>
+              <button style={S.btnP} onClick={exportData}>⬇ Exporteer ({gesprekken.length} gesprekken · {overleggen.length} overleggen)</button>
               <button style={S.btnS} onClick={() => fileRef.current.click()}>⬆ Importeer back-up</button>
               <input ref={fileRef} type="file" accept=".json" style={{ display:'none' }} onChange={importData} />
             </div>
@@ -1414,14 +1750,17 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
       const [view, setView] = useState('gesprekken');
       const [gesprekken, setGesprekken] = useState(() => store.loadGesprekken());
       const [bronnen, setBronnen] = useState(() => store.loadContext());
+      const [overleggen, setOverleggen] = useState(() => store.loadOverleggen() || START_OVERLEGGEN);
       const [editingId, setEditingId] = useState(null);
 
       useEffect(() => { store.saveGesprekken(gesprekken); }, [gesprekken]);
       useEffect(() => { store.saveContext(bronnen); }, [bronnen]);
+      useEffect(() => { store.saveOverleggen(overleggen); }, [overleggen]);
 
       const handleImport = useCallback((data) => {
         setGesprekken(data.gesprekken || []);
         setBronnen(data.bronnen || []);
+        if (data.overleggen) setOverleggen(data.overleggen);
       }, []);
 
       const handleSaveKey = (k) => { store.setApiKey(k); setApiKeyState(k); setShowSetup(false); };
@@ -1437,6 +1776,7 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
         { id:'gesprekken',   label:'Gesprekken',   },
         { id:'patronen',     label:'Patronen',     },
         { id:'diagnose',     label:'Diagnose',     },
+        { id:'overleggen',   label:'Overleggen',   },
         { id:'notitie',      label:'Notitie',      },
         { id:'instellingen', label:'Instellingen', },
       ];
@@ -1465,8 +1805,9 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
             {view==='form' && <FormView gesprek={editingId ? gesprekken.find(g=>g.id===editingId) : null} onSave={handleSave} onCancel={() => { setEditingId(null); setView('gesprekken'); }} />}
             {view==='patronen' && <PatronenView gesprekken={gesprekken} apiKey={apiKey} />}
             {view==='diagnose' && <DiagnoseView gesprekken={gesprekken} bronnen={bronnen} onBronnenChange={setBronnen} apiKey={apiKey} />}
+            {view==='overleggen' && <OverleggenView overleggen={overleggen} onOverleggenChange={setOverleggen} apiKey={apiKey} />}
             {view==='notitie' && <NotitieView gesprekken={gesprekken} apiKey={apiKey} />}
-            {view==='instellingen' && <InstellingenView apiKey={apiKey} onSaveKey={handleSaveKey} gesprekken={gesprekken} bronnen={bronnen} onImport={handleImport} />}
+            {view==='instellingen' && <InstellingenView apiKey={apiKey} onSaveKey={handleSaveKey} gesprekken={gesprekken} bronnen={bronnen} overleggen={overleggen} onImport={handleImport} />}
           </main>
         </div>
       );
