@@ -1561,7 +1561,26 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
                   </button>
                 </div>
                 {aiErr && <div style={{ fontSize:13, color:C.red, marginBottom:10 }}>{aiErr}</div>}
-                {aiText && <div style={S.aiBox}>{aiText}</div>}
+                {aiText && (
+                  <>
+                    <div style={S.aiBox}>{aiText}</div>
+                    <div style={{ display:'flex', gap:8, marginTop:12 }}>
+                      <button style={S.btnS} onClick={() => navigator.clipboard?.writeText(aiText)}>📋 Kopieer analyse</button>
+                      <button style={S.btnS} onClick={() => {
+                        const win = window.open('', '_blank');
+                        if (!win) return;
+                        win.document.write(`<!DOCTYPE html><html lang="nl"><head><meta charset="UTF-8"/><title>Overleganalyse B&S</title>
+                        <link href="https://fonts.googleapis.com/css2?family=Lora:wght@700&family=Inter:wght@400;600&display=swap" rel="stylesheet"/>
+                        <style>body{font-family:'Inter',sans-serif;padding:40px;max-width:800px;margin:0 auto;color:#1C1C1C;}h1{font-family:'Lora',serif;color:#1A3057;font-size:20px;margin-bottom:4px;}.sub{font-size:12px;color:#888;margin-bottom:28px;padding-bottom:12px;border-bottom:2px solid #D5CFBF;}pre{white-space:pre-wrap;font-family:'Inter',sans-serif;font-size:14px;line-height:1.8;}.btn{position:fixed;top:20px;right:20px;background:#1A3057;color:white;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;}@media print{.btn{display:none;}}</style>
+                        </head><body><button class="btn" onclick="window.print()">🖨 Print / PDF</button>
+                        <h1>Analyse overlegstructuur — B&S OM Parket Den Haag</h1>
+                        <div class="sub">Gegenereerd op ${new Date().toLocaleDateString('nl-NL',{day:'numeric',month:'long',year:'numeric'})}</div>
+                        <pre>${aiText}</pre></body></html>`);
+                        win.document.close();
+                      }}>🖨 Exporteer / Print</button>
+                    </div>
+                  </>
+                )}
                 {!aiText && !aiLoading && <div style={{ fontSize:13, color:C.mid, fontStyle:'italic' }}>Klik op "Analyseer" om een AI-analyse van de overlegstructuur te genereren.</div>}
               </div>
             </div>
@@ -1572,16 +1591,26 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
 
     function NetworkGraph({ overleggen }) {
       const ref = React.useRef();
-      const PRIO_SIZE = { Hoog: 18, Medium: 13, Laag: 9, 'Geen prio': 9, Nvt: 9 };
+      const PRIO_SIZE = { Hoog: 22, Medium: 15, Laag: 10, 'Geen prio': 10, Nvt: 10 };
 
       React.useEffect(() => {
         if (!ref.current || typeof d3 === 'undefined') return;
         const el = ref.current;
         d3.select(el).selectAll('*').remove();
 
-        const w = el.offsetWidth || 600, h = 420;
-        const svg = d3.select(el).append('svg').attr('width', w).attr('height', h);
+        const w = el.offsetWidth || 700, h = 650;
+        const svg = d3.select(el).append('svg').attr('width', w).attr('height', h).style('display','block');
         svg.append('rect').attr('width', w).attr('height', h).attr('fill', '#F6F2EA').attr('rx', 10);
+
+        // Zoom + pan
+        const g = svg.append('g');
+        const zoom = d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => g.attr('transform', e.transform));
+        svg.call(zoom);
+
+        // Reset zoom button hint
+        svg.append('text').attr('x', 10).attr('y', h - 10)
+          .attr('font-size', 10).attr('fill', '#888').attr('font-family', 'Inter, sans-serif')
+          .text('Scroll = zoom · Sleep = pan · Knooppunten versleepbaar');
 
         const nodes = overleggen.map(o => ({ id: o.naam, type: o.type, prio: o.prioriteit, eigenaar: o.eigenaar, toets: Object.values(o.toets||{}) }));
         const links = [];
@@ -1592,50 +1621,57 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
         });
 
         const sim = d3.forceSimulation(nodes)
-          .force('link', d3.forceLink(links).id(d => d.id).distance(80))
-          .force('charge', d3.forceManyBody().strength(-120))
+          .force('link', d3.forceLink(links).id(d => d.id).distance(110))
+          .force('charge', d3.forceManyBody().strength(-200))
           .force('center', d3.forceCenter(w/2, h/2))
-          .force('collision', d3.forceCollide(d => (PRIO_SIZE[d.prio]||10) + 6));
+          .force('collision', d3.forceCollide(d => (PRIO_SIZE[d.prio]||12) + 20));
 
-        const link = svg.append('g').selectAll('line').data(links).join('line')
-          .attr('stroke', '#D5CFBF').attr('stroke-width', 1.5);
+        const link = g.append('g').selectAll('line').data(links).join('line')
+          .attr('stroke', '#C0B8A8').attr('stroke-width', 1.5);
 
-        const node = svg.append('g').selectAll('g').data(nodes).join('g').call(
-          d3.drag().on('start', (e,d) => { if(!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+        const node = g.append('g').selectAll('g').data(nodes).join('g')
+          .style('cursor', 'grab')
+          .call(d3.drag()
+            .on('start', (e,d) => { if(!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
             .on('drag', (e,d) => { d.fx=e.x; d.fy=e.y; })
             .on('end', (e,d) => { if(!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; })
-        );
+          );
 
         node.append('circle')
-          .attr('r', d => PRIO_SIZE[d.prio]||10)
+          .attr('r', d => PRIO_SIZE[d.prio]||12)
           .attr('fill', d => TYPE_COLORS[d.type]||C.navy)
-          .attr('opacity', 0.85)
-          .attr('stroke', C.white).attr('stroke-width', 1.5);
+          .attr('opacity', 0.88)
+          .attr('stroke', C.white).attr('stroke-width', 2);
 
+        // Label below node
         node.append('text')
-          .attr('text-anchor','middle').attr('dy','0.35em')
-          .attr('font-size', d => Math.max(7, (PRIO_SIZE[d.prio]||10) * 0.55))
-          .attr('fill', C.white).attr('font-weight','700')
+          .attr('text-anchor','middle')
+          .attr('dy', d => (PRIO_SIZE[d.prio]||12) + 13)
+          .attr('font-size', 9).attr('fill', C.navy).attr('font-weight','600')
           .attr('pointer-events','none')
-          .text(d => d.id[0]);
+          .text(d => d.id.length > 20 ? d.id.slice(0,18)+'…' : d.id);
 
         const tooltip = d3.select(el).append('div')
-          .style('position','absolute').style('background',C.navyDk).style('color',C.white)
+          .style('position','absolute').style('background', C.navyDk).style('color', C.white)
           .style('padding','8px 12px').style('border-radius','8px').style('font-size','12px')
-          .style('pointer-events','none').style('opacity',0).style('max-width','200px')
-          .style('font-family',"'Inter', sans-serif").style('line-height','1.5');
+          .style('pointer-events','none').style('opacity',0).style('max-width','240px')
+          .style('font-family',"'Inter', sans-serif").style('line-height','1.6').style('z-index','20');
 
         node.on('mouseenter', (e,d) => {
-          const t = d.toets.length ? (d.toets.every(v=>v==='Ja') ? '✅ Ja' : d.toets.some(v=>v==='Nee') ? '❌ Nee' : '⚠ Deels') : '— niet getoetst';
-          tooltip.style('opacity',1).html(`<strong>${d.id}</strong><br/>${d.eigenaar||'geen eigenaar'}<br/>Prio: ${d.prio}<br/>Toetsing: ${t}`);
+          const vals = d.toets;
+          const t = vals.length ? (vals.every(v=>v==='Ja') ? '✅ Ja' : vals.some(v=>v==='Nee') ? '❌ Nee' : '⚠ Deels') : '— niet getoetst';
+          tooltip.style('opacity',1).html(`<strong>${d.id}</strong><br/>${d.eigenaar||'geen eigenaar'}<br/>Prioriteit: ${d.prio} · ${d.type}<br/>Toetsing: ${t}`);
         }).on('mousemove', e => {
           const rect = el.getBoundingClientRect();
-          tooltip.style('left', (e.clientX - rect.left + 10)+'px').style('top', (e.clientY - rect.top - 30)+'px');
+          const tx = e.clientX - rect.left + 14;
+          const ty = e.clientY - rect.top - 40;
+          tooltip.style('left', tx+'px').style('top', ty+'px');
         }).on('mouseleave', () => tooltip.style('opacity', 0));
 
         sim.on('tick', () => {
-          link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
-          node.attr('transform', d => `translate(${Math.max(20,Math.min(w-20,d.x))},${Math.max(20,Math.min(h-20,d.y))})`);
+          link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+              .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+          node.attr('transform', d => `translate(${d.x},${d.y})`);
         });
 
         return () => sim.stop();
@@ -1645,18 +1681,18 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
 
       return (
         <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, overflow:'hidden' }}>
-          <div style={{ background:C.navy, padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div style={{ background:C.navy, padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8 }}>
             <span style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.white }}>Netwerkvisualisatie</span>
-            <div style={{ display:'flex', gap:12 }}>
+            <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
               {legenda.map(([lbl,col]) => (
                 <div key={lbl} style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'rgba(255,255,255,0.7)' }}>
                   <div style={{ width:10, height:10, borderRadius:'50%', background:col }} />{lbl}
                 </div>
               ))}
-              <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)' }}>Grootte = prioriteit · Sleep om te bewegen</span>
+              <span style={{ fontSize:10, color:'rgba(255,255,255,0.4)' }}>Groot = hoge prio</span>
             </div>
           </div>
-          <div ref={ref} style={{ position:'relative', width:'100%', minHeight:420 }} />
+          <div ref={ref} style={{ position:'relative', width:'100%', height:650 }} />
         </div>
       );
     }
