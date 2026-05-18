@@ -1428,7 +1428,17 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
               <div style={S.secTitle}>Overleggen</div>
               <div style={{ fontSize:13, color:C.mid }}>{overleggen.length} overleggen</div>
             </div>
-            <button style={S.btnP} onClick={addOverleg}>+ Nieuw overleg</button>
+            <div style={{ display:'flex', gap:8 }}>
+              <button style={S.btnS} onClick={() => {
+                const bestaandeNamen = overleggen.map(o => o.naam.toLowerCase().trim());
+                const toe = START_OVERLEGGEN.filter(s => !bestaandeNamen.includes(s.naam.toLowerCase().trim()));
+                if (toe.length === 0) { alert('Alle overleggen uit de overdracht staan er al in.'); return; }
+                if (window.confirm(`${toe.length} ontbrekende overleggen toevoegen uit de overdracht van Lodewijk?`)) {
+                  onOverleggenChange([...overleggen, ...toe.map(o => ({ ...o, id: uid() }))]);
+                }
+              }}>+ Laad uit overdracht</button>
+              <button style={S.btnP} onClick={addOverleg}>+ Nieuw overleg</button>
+            </div>
           </div>
 
           <div style={{ display:'flex', gap:8, marginBottom:20 }}>
