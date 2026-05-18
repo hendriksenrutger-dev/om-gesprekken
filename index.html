@@ -1382,6 +1382,7 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
 
     function OverleggenView({ overleggen, onOverleggenChange, apiKey }) {
       const [tab, setTab] = useState('inventaris');
+      const [netwerkTab, setNetwerkTab] = useState('graph');
       const [editing, setEditing] = useState(null);
       const [aiText, setAiText] = useState('');
       const [aiLoading, setAiLoading] = useState(false);
@@ -1580,37 +1581,176 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
           {/* ── NETWERK ── */}
           {tab === 'netwerk' && (
             <div className="fade-in">
-              <NetworkGraph overleggen={overleggen} />
-              <div style={{ marginTop:20 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
-                  <div style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.navy }}>AI-analyse overlegstructuur</div>
-                  <button style={S.btnP} onClick={analyzeAI} disabled={aiLoading}>
-                    {aiLoading ? <><Spinner /> Analyseren…</> : '🔍 Analyseer'}
+              <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+                {[['graph','🔗 Overlegnetwerk'],['persoon','👤 Persoonsniveau']].map(([id,lbl]) => (
+                  <button key={id} onClick={() => setNetwerkTab(id)}
+                    style={{ ...S.btnS, background: netwerkTab===id ? C.navyLt : 'transparent', color: netwerkTab===id ? C.white : C.navy, fontSize:12 }}>
+                    {lbl}
                   </button>
-                </div>
-                {aiErr && <div style={{ fontSize:13, color:C.red, marginBottom:10 }}>{aiErr}</div>}
-                {aiText && (
-                  <>
-                    <div style={S.aiBox}>{aiText}</div>
-                    <div style={{ display:'flex', gap:8, marginTop:12 }}>
-                      <button style={S.btnS} onClick={() => navigator.clipboard?.writeText(aiText)}>📋 Kopieer analyse</button>
-                      <button style={S.btnS} onClick={() => {
-                        const win = window.open('', '_blank');
-                        if (!win) return;
-                        win.document.write(`<!DOCTYPE html><html lang="nl"><head><meta charset="UTF-8"/><title>Overleganalyse B&S</title>
-                        <link href="https://fonts.googleapis.com/css2?family=Lora:wght@700&family=Inter:wght@400;600&display=swap" rel="stylesheet"/>
-                        <style>body{font-family:'Inter',sans-serif;padding:40px;max-width:800px;margin:0 auto;color:#1C1C1C;}h1{font-family:'Lora',serif;color:#1A3057;font-size:20px;margin-bottom:4px;}.sub{font-size:12px;color:#888;margin-bottom:28px;padding-bottom:12px;border-bottom:2px solid #D5CFBF;}pre{white-space:pre-wrap;font-family:'Inter',sans-serif;font-size:14px;line-height:1.8;}.btn{position:fixed;top:20px;right:20px;background:#1A3057;color:white;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;}@media print{.btn{display:none;}}</style>
-                        </head><body><button class="btn" onclick="window.print()">🖨 Print / PDF</button>
-                        <h1>Analyse overlegstructuur — B&S OM Parket Den Haag</h1>
-                        <div class="sub">Gegenereerd op ${new Date().toLocaleDateString('nl-NL',{day:'numeric',month:'long',year:'numeric'})}</div>
-                        <pre>${aiText}</pre></body></html>`);
-                        win.document.close();
-                      }}>🖨 Exporteer / Print</button>
-                    </div>
-                  </>
-                )}
-                {!aiText && !aiLoading && <div style={{ fontSize:13, color:C.mid, fontStyle:'italic' }}>Klik op "Analyseer" om een AI-analyse van de overlegstructuur te genereren.</div>}
+                ))}
               </div>
+
+              {netwerkTab === 'graph' && (
+                <>
+                  <NetworkGraph overleggen={overleggen} />
+                  <div style={{ marginTop:20 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+                      <div style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.navy }}>AI-analyse overlegstructuur</div>
+                      <button style={S.btnP} onClick={analyzeAI} disabled={aiLoading}>
+                        {aiLoading ? <><Spinner /> Analyseren…</> : '🔍 Analyseer'}
+                      </button>
+                    </div>
+                    {aiErr && <div style={{ fontSize:13, color:C.red, marginBottom:10 }}>{aiErr}</div>}
+                    {aiText && (
+                      <>
+                        <div style={S.aiBox}>{aiText}</div>
+                        <div style={{ display:'flex', gap:8, marginTop:12 }}>
+                          <button style={S.btnS} onClick={() => navigator.clipboard?.writeText(aiText)}>📋 Kopieer analyse</button>
+                          <button style={S.btnS} onClick={() => {
+                            const win = window.open('', '_blank');
+                            if (!win) return;
+                            win.document.write(`<!DOCTYPE html><html lang="nl"><head><meta charset="UTF-8"/><title>Overleganalyse B&S</title>
+                            <link href="https://fonts.googleapis.com/css2?family=Lora:wght@700&family=Inter:wght@400;600&display=swap" rel="stylesheet"/>
+                            <style>body{font-family:'Inter',sans-serif;padding:40px;max-width:800px;margin:0 auto;color:#1C1C1C;}h1{font-family:'Lora',serif;color:#1A3057;font-size:20px;margin-bottom:4px;}.sub{font-size:12px;color:#888;margin-bottom:28px;padding-bottom:12px;border-bottom:2px solid #D5CFBF;}pre{white-space:pre-wrap;font-family:'Inter',sans-serif;font-size:14px;line-height:1.8;}.btn{position:fixed;top:20px;right:20px;background:#1A3057;color:white;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;}@media print{.btn{display:none;}}</style>
+                            </head><body><button class="btn" onclick="window.print()">🖨 Print / PDF</button>
+                            <h1>Analyse overlegstructuur — B&S OM Parket Den Haag</h1>
+                            <div class="sub">Gegenereerd op ${new Date().toLocaleDateString('nl-NL',{day:'numeric',month:'long',year:'numeric'})}</div>
+                            <pre>${aiText}</pre></body></html>`);
+                            win.document.close();
+                          }}>🖨 Exporteer / Print</button>
+                        </div>
+                      </>
+                    )}
+                    {!aiText && !aiLoading && <div style={{ fontSize:13, color:C.mid, fontStyle:'italic' }}>Klik op "Analyseer" om een AI-analyse van de overlegstructuur te genereren.</div>}
+                  </div>
+                </>
+              )}
+
+              {netwerkTab === 'persoon' && <PersoonView overleggen={overleggen} />}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const toetsTotaalFn = (o) => {
+      const vals = Object.values(o.toets || {});
+      if (!vals.length) return null;
+      if (vals.every(v => v === 'Ja')) return 'Ja';
+      if (vals.some(v => v === 'Nee')) return 'Nee';
+      return 'Deels';
+    };
+
+    function PersoonView({ overleggen }) {
+      const [zoek, setZoek] = useState('');
+      const [selectie, setSelectie] = useState(null);
+
+      // Verzamel alle personen uit eigenaar + deelnemers velden
+      const personen = React.useMemo(() => {
+        const set = new Set();
+        overleggen.forEach(o => {
+          if (o.eigenaar) o.eigenaar.split(/[,/·]/).map(s => s.trim()).filter(Boolean).forEach(p => set.add(p));
+          if (o.deelnemers) o.deelnemers.split(/[,/·]/).map(s => s.trim()).filter(Boolean).forEach(p => set.add(p));
+        });
+        return [...set].sort();
+      }, [overleggen]);
+
+      const gefilterd = zoek.length > 1
+        ? personen.filter(p => p.toLowerCase().includes(zoek.toLowerCase()))
+        : personen;
+
+      const overleggenVanPersoon = (naam) => overleggen.filter(o => {
+        const alle = [o.eigenaar, o.deelnemers].join(' / ');
+        return alle.toLowerCase().includes(naam.toLowerCase());
+      });
+
+      const medePersonen = (naam) => {
+        const ovs = overleggenVanPersoon(naam);
+        const set = new Set();
+        ovs.forEach(o => {
+          [o.eigenaar, o.deelnemers].join(' / ').split(/[,/·]/).map(s=>s.trim()).filter(Boolean)
+            .forEach(p => { if (p !== naam && p.length > 2) set.add(p); });
+        });
+        return [...set];
+      };
+
+      const geselecteerdeOverleggen = selectie ? overleggenVanPersoon(selectie) : [];
+
+      return (
+        <div>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20, marginBottom:16 }}>
+            <div style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.navy, marginBottom:12 }}>Zoek op naam of functie</div>
+            <input style={{ ...S.inp, marginBottom:12 }} placeholder="Typ een naam — bijv. Hilde, Marcel, Hanneke…"
+              value={zoek} onChange={e => { setZoek(e.target.value); setSelectie(null); }} />
+            <div style={{ display:'flex', flexWrap:'wrap', gap:6, maxHeight:160, overflowY:'auto' }}>
+              {gefilterd.map(p => (
+                <button key={p} onClick={() => setSelectie(p === selectie ? null : p)}
+                  style={{ padding:'5px 12px', borderRadius:20, fontSize:12, border:`1.5px solid ${selectie===p ? C.navy : C.border}`, background: selectie===p ? C.navy : C.white, color: selectie===p ? C.white : C.mid, cursor:'pointer', fontWeight: selectie===p ? 600 : 400 }}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {selectie && (
+            <div className="fade-in">
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, overflow:'hidden', marginBottom:16 }}>
+                <div style={{ background:C.navy, padding:'12px 18px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <div>
+                    <div style={{ fontFamily:"'Lora',serif", fontSize:15, fontWeight:700, color:C.white }}>{selectie}</div>
+                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)' }}>{geselecteerdeOverleggen.length} overleggen</div>
+                  </div>
+                  <button onClick={() => setSelectie(null)} style={{ background:'none', border:'none', color:'rgba(255,255,255,0.5)', fontSize:20, cursor:'pointer' }}>×</button>
+                </div>
+                <div style={{ padding:16 }}>
+                  {geselecteerdeOverleggen.map(o => (
+                    <div key={o.id} style={{ padding:'10px 14px', borderRadius:8, border:`1px solid ${C.border}`, marginBottom:8, borderLeft:`3px solid ${TYPE_COLORS[o.type]||C.border}` }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                        <div>
+                          <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700 }}>{o.naam}</div>
+                          <div style={{ fontSize:11, color:C.mid, marginTop:2 }}>
+                            {o.type} · {o.frequentie} · Prio: {o.prioriteit}
+                          </div>
+                          {o.eigenaar && o.eigenaar.toLowerCase().includes(selectie.toLowerCase()) && (
+                            <span style={{ ...S.pill(C.navy), fontSize:10, marginTop:4, display:'inline-block' }}>Eigenaar</span>
+                          )}
+                        </div>
+                      {toetsTotaalFn(o) && <span style={S.pill(TOETS_COLORS[toetsTotaalFn(o)]||C.mid)}>{toetsTotaalFn(o)}</span>}
+                      </div>
+                      {o.doel && <div style={{ fontSize:12, color:C.mid, marginTop:6, fontStyle:'italic' }}>{o.doel.slice(0,100)}{o.doel.length>100?'…':''}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {medePersonen(selectie).length > 0 && (
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:16 }}>
+                  <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.navy, marginBottom:12 }}>
+                    Collega's in dezelfde overleggen
+                  </div>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                    {medePersonen(selectie).map(p => {
+                      const gedeeld = overleggenVanPersoon(selectie).filter(o =>
+                        [o.eigenaar, o.deelnemers].join(' / ').toLowerCase().includes(p.toLowerCase())
+                      ).length;
+                      return (
+                        <button key={p} onClick={() => setSelectie(p)}
+                          style={{ padding:'6px 14px', borderRadius:20, fontSize:12, border:`1.5px solid ${C.border}`, background:C.creamDk, color:C.navy, cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
+                          {p}
+                          <span style={{ background:C.navy, color:C.white, borderRadius:10, padding:'1px 6px', fontSize:10, fontWeight:700 }}>{gedeeld}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize:11, color:C.light, marginTop:8 }}>Getal = aantal gedeelde overleggen · Klik om door te klikken</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!selectie && (
+            <div style={S.empty}>
+              <div style={{ fontSize:14 }}>Kies een persoon om te zien in welke overleggen hij of zij zit en met wie.</div>
             </div>
           )}
         </div>
@@ -1618,29 +1758,30 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
     }
 
     function NetworkGraph({ overleggen }) {
-      const ref = React.useRef();
+      const containerRef = React.useRef();
+      const [fullscreen, setFullscreen] = useState(false);
       const PRIO_SIZE = { Hoog: 22, Medium: 15, Laag: 10, 'Geen prio': 10, Nvt: 10 };
 
-      React.useEffect(() => {
-        if (!ref.current || typeof d3 === 'undefined') return;
-        const el = ref.current;
+      const buildGraph = React.useCallback((el) => {
+        if (!el || typeof d3 === 'undefined') return;
         d3.select(el).selectAll('*').remove();
 
-        const w = el.offsetWidth || 700, h = 650;
+        const w = el.offsetWidth || 700, h = fullscreen ? window.innerHeight - 120 : 650;
         const svg = d3.select(el).append('svg').attr('width', w).attr('height', h).style('display','block');
         svg.append('rect').attr('width', w).attr('height', h).attr('fill', '#F6F2EA').attr('rx', 10);
 
-        // Zoom + pan
         const g = svg.append('g');
-        const zoom = d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => g.attr('transform', e.transform));
+        const zoom = d3.zoom().scaleExtent([0.15, 5]).on('zoom', e => g.attr('transform', e.transform));
         svg.call(zoom);
 
-        // Reset zoom button hint
         svg.append('text').attr('x', 10).attr('y', h - 10)
-          .attr('font-size', 10).attr('fill', '#888').attr('font-family', 'Inter, sans-serif')
-          .text('Scroll = zoom · Sleep = pan · Knooppunten versleepbaar');
+          .attr('font-size', 10).attr('fill', '#AAA').attr('font-family', 'Inter, sans-serif')
+          .text('Scroll = zoom · Sleep achtergrond = pan · Sleep bolletje = verplaatsen (blijft vast)');
 
-        const nodes = overleggen.map(o => ({ id: o.naam, type: o.type, prio: o.prioriteit, eigenaar: o.eigenaar, toets: Object.values(o.toets||{}) }));
+        const nodes = overleggen.map(o => ({
+          id: o.naam, type: o.type, prio: o.prioriteit, eigenaar: o.eigenaar,
+          toets: Object.values(o.toets||{}), fixed: false
+        }));
         const links = [];
         overleggen.forEach(o => {
           (o.relaties||[]).forEach(r => {
@@ -1649,20 +1790,28 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
         });
 
         const sim = d3.forceSimulation(nodes)
-          .force('link', d3.forceLink(links).id(d => d.id).distance(110))
-          .force('charge', d3.forceManyBody().strength(-200))
+          .force('link', d3.forceLink(links).id(d => d.id).distance(120))
+          .force('charge', d3.forceManyBody().strength(-220))
           .force('center', d3.forceCenter(w/2, h/2))
-          .force('collision', d3.forceCollide(d => (PRIO_SIZE[d.prio]||12) + 20));
+          .force('collision', d3.forceCollide(d => (PRIO_SIZE[d.prio]||12) + 22));
 
         const link = g.append('g').selectAll('line').data(links).join('line')
           .attr('stroke', '#C0B8A8').attr('stroke-width', 1.5);
 
-        const node = g.append('g').selectAll('g').data(nodes).join('g')
-          .style('cursor', 'grab')
+        const node = g.append('g').selectAll('g').data(nodes).join('g').style('cursor','grab')
           .call(d3.drag()
-            .on('start', (e,d) => { if(!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
-            .on('drag', (e,d) => { d.fx=e.x; d.fy=e.y; })
-            .on('end', (e,d) => { if(!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; })
+            .filter(e => !e.ctrlKey && !e.button)
+            .on('start', (e,d) => {
+              e.sourceEvent.stopPropagation();
+              if (!e.active) sim.alphaTarget(0.3).restart();
+              d.fx = d.x; d.fy = d.y;
+            })
+            .on('drag', (e,d) => { d.fx = e.x; d.fy = e.y; })
+            .on('end', (e,d) => {
+              if (!e.active) sim.alphaTarget(0);
+              // Keep node pinned where dropped
+              d.fx = e.x; d.fy = e.y;
+            })
           );
 
         node.append('circle')
@@ -1671,7 +1820,9 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
           .attr('opacity', 0.88)
           .attr('stroke', C.white).attr('stroke-width', 2);
 
-        // Label below node
+        // Double-click to unpin
+        node.on('dblclick', (e, d) => { e.stopPropagation(); d.fx = null; d.fy = null; sim.alphaTarget(0.1).restart(); });
+
         node.append('text')
           .attr('text-anchor','middle')
           .attr('dy', d => (PRIO_SIZE[d.prio]||12) + 13)
@@ -1687,13 +1838,11 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
 
         node.on('mouseenter', (e,d) => {
           const vals = d.toets;
-          const t = vals.length ? (vals.every(v=>v==='Ja') ? '✅ Ja' : vals.some(v=>v==='Nee') ? '❌ Nee' : '⚠ Deels') : '— niet getoetst';
-          tooltip.style('opacity',1).html(`<strong>${d.id}</strong><br/>${d.eigenaar||'geen eigenaar'}<br/>Prioriteit: ${d.prio} · ${d.type}<br/>Toetsing: ${t}`);
+          const t = vals.length ? (vals.every(v=>v==='Ja') ? '✅' : vals.some(v=>v==='Nee') ? '❌' : '⚠') : '–';
+          tooltip.style('opacity',1).html(`<strong>${d.id}</strong><br/>${d.eigenaar||'geen eigenaar'}<br/>${d.prio} · ${d.type} · ${t}<br/><em style="font-size:10px;opacity:0.6">Dubbelklik om los te maken</em>`);
         }).on('mousemove', e => {
           const rect = el.getBoundingClientRect();
-          const tx = e.clientX - rect.left + 14;
-          const ty = e.clientY - rect.top - 40;
-          tooltip.style('left', tx+'px').style('top', ty+'px');
+          tooltip.style('left', (e.clientX-rect.left+14)+'px').style('top', (e.clientY-rect.top-40)+'px');
         }).on('mouseleave', () => tooltip.style('opacity', 0));
 
         sim.on('tick', () => {
@@ -1703,24 +1852,35 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
         });
 
         return () => sim.stop();
-      }, [overleggen]);
+      }, [overleggen, fullscreen]);
+
+      React.useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        return buildGraph(el);
+      }, [buildGraph]);
 
       const legenda = [['Intern',C.navy],['Extern',C.gold],['Beide',C.green]];
+      const h = fullscreen ? window.innerHeight - 120 : 650;
 
       return (
         <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, overflow:'hidden' }}>
           <div style={{ background:C.navy, padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8 }}>
             <span style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.white }}>Netwerkvisualisatie</span>
-            <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+            <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'center' }}>
               {legenda.map(([lbl,col]) => (
                 <div key={lbl} style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'rgba(255,255,255,0.7)' }}>
                   <div style={{ width:10, height:10, borderRadius:'50%', background:col }} />{lbl}
                 </div>
               ))}
               <span style={{ fontSize:10, color:'rgba(255,255,255,0.4)' }}>Groot = hoge prio</span>
+              <button onClick={() => setFullscreen(f => !f)}
+                style={{ background:'rgba(255,255,255,0.15)', border:'none', color:C.white, borderRadius:6, padding:'4px 10px', fontSize:11, cursor:'pointer' }}>
+                {fullscreen ? '⊡ Kleiner' : '⊞ Volledig scherm'}
+              </button>
             </div>
           </div>
-          <div ref={ref} style={{ position:'relative', width:'100%', height:650 }} />
+          <div ref={containerRef} style={{ position:'relative', width:'100%', height:h }} />
         </div>
       );
     }
