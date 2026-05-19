@@ -1,4 +1,4 @@
-const CACHE = 'om-gesprekken-v23';
+const CACHE = 'om-gesprekken-v25';
 const ASSETS = [
   './',
   './index.html',

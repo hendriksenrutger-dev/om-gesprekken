@@ -151,6 +151,12 @@
         { id:'pl_verschil', label:'Wat is het verschil tussen B&S nu en B&S zoals u het voor ogen heeft?', rows:4 },
         { id:'pl_weten',   label:'Zijn er zaken die u heeft gehoord of gezien die ik moet weten voor mijn diagnose?', rows:3 },
       ]},
+      { id:'hyp', title:'04 · Toetsing functionele hypothese', hint:'Leg de drie elementen voor als hypothese — niet als voorstel. Luister of de parketleiding ze herkent, aanvult of verwerpt. Het antwoord bepaalt het DECIDE-moment.', fields:[
+        { id:'hyp_staf', label:'B&S als staf voor de parketleiding — bestuursondersteuning, parketbrede beleidsadvisering, communicatie. Herkent u dat als kern van wat u van B&S verwacht?', rows:4 },
+        { id:'hyp_teams', label:'B&S als beleidsmatige ondersteuning dicht op de operationele teams — thematisch, op onderwerpen die de grenzen van één team overstijgen. Is dat wat teamleiders en rechercheofficieren van B&S mogen verwachten — of hoort dat elders thuis?', rows:4 },
+        { id:'hyp_verwerving', label:'B&S als bewaker van de verwervingsstrategie als geheel — niet zelf verwerven maar bewaken dat parallelle inspanningen samen kloppen binnen het productiekader. Wie is daar nu eigenaar van — en zou dat B&S moeten zijn?', rows:4 },
+        { id:'hyp_reactie', label:'Reactie op de hypothese als geheel — wat herkent men, wat niet, wat ontbreekt volgens de parketleiding om dit waar te maken?', rows:5 },
+      ]},
     ];
 
     const DIAG_PL = [
@@ -1885,6 +1891,211 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
       );
     }
 
+    // ─── DASHBOARD ────────────────────────────────────────────────────────────
+    const FASE_DEF = [
+      { id:'f0',  label:'Fase 0',  titel:'Mandate ophalen',
+        beschrijving:'Bevestigde opdracht + rolverdeling teamleider',
+        checkItems:['Gesprek met hoofdofficier','Opdrachtnotitie verstuurd','Bevestiging ontvangen','Rolverdeling teamleider vastgesteld'] },
+      { id:'f1',  label:'Fase 1',  titel:'Diagnose & kennismakingen',
+        beschrijving:'Gesprekken medewerkers + selectie stakeholders · Bevindingsnotitie',
+        checkItems:['Gesprekken medewerkers (doel: ~15)','Gesprekken stakeholders (doel: 4-6)','MTO/bronnen verwerkt','Patroonanalyse gedraaid','Bevindingsnotitie geschreven'] },
+      { id:'f1b', label:'Fase 1B', titel:'Parketleiding, MT en afdeling',
+        beschrijving:'Interviews parketleiding · DECIDE · MT-communicatie · Afdeling informeren',
+        checkItems:['Interview hoofdofficier','Interview plaatsvervangend hoofdofficier','Interview directeur bedrijfsvoering','DECIDE-moment — scenariokeuze + commitment','MT-communicatie','Afdeling informeren'] },
+      { id:'f1c', label:'Fase 1C', titel:'Positionering en taakomschrijving',
+        beschrijving:'Positiedocument vastgesteld · Taakomschrijving per cluster · Clusters geïnformeerd',
+        checkItems:['Positiedocument geschreven','Positiedocument vastgesteld door hoofdofficier','Voorlopige taakomschrijving per cluster','Clusters geïnformeerd met kader'] },
+      { id:'f2',  label:'Fase 2',  titel:'Clusters aan het werk',
+        beschrijving:'Clusters voeren stakeholdergesprekken · Clusterverslagen',
+        checkItems:['Clusteropdrachten gegeven','Clusterverslagen ontvangen','Gezamenlijk beeld gevormd'] },
+      { id:'f3',  label:'Fase 3',  titel:'Afdelingsdocument',
+        beschrijving:'Missie · Leidende principes · Rolverwachtingen per cluster',
+        checkItems:['Afdelingsdocument geschreven','Afdelingsdocument vastgesteld','Gecommuniceerd naar afdeling'] },
+      { id:'f4',  label:'Fase 4',  titel:'Borging',
+        beschrijving:'Overlegstructuur · Gedragsindicatoren · Bijsturing na 6 maanden',
+        checkItems:['Overlegstructuur ingevoerd','Gedragsindicatoren nulmeting','Bijsturingsmoment 6 maanden gepland'] },
+    ];
+
+    function DashboardView({ gesprekken, bronnen, onNav }) {
+      const [checks, setChecks] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('om-dashboard-checks') || '{}'); } catch { return {}; }
+      });
+      const [activeFase, setActiveFase] = useState(() => {
+        return localStorage.getItem('om-dashboard-fase') || 'f1';
+      });
+      const [openFase, setOpenFase] = useState('f1');
+
+      const saveChecks = (c) => { setChecks(c); try { localStorage.setItem('om-dashboard-checks', JSON.stringify(c)); } catch {} };
+      const setFase = (id) => { setActiveFase(id); try { localStorage.setItem('om-dashboard-fase', id); } catch {} };
+
+      const toggle = (faseId, idx) => {
+        const key = `${faseId}_${idx}`;
+        saveChecks({ ...checks, [key]: !checks[key] });
+      };
+
+      const faseProgress = (f) => {
+        const done = f.checkItems.filter((_, i) => checks[`${f.id}_${i}`]).length;
+        return { done, total: f.checkItems.length };
+      };
+
+      const STATUS_STYLE = {
+        afgerond: { bg: C.greenLt, border: C.green, color: C.green, dot: C.green },
+        actief:   { bg: '#EEF3FA', border: C.navyLt, color: C.navyLt, dot: C.navyLt },
+        open:     { bg: C.creamDk, border: C.border, color: C.light, dot: C.border },
+      };
+
+      const getFaseStatus = (f) => {
+        const { done, total } = faseProgress(f);
+        if (done === total) return 'afgerond';
+        if (f.id === activeFase) return 'actief';
+        return 'open';
+      };
+
+      const aktief = FASE_DEF.find(f => f.id === activeFase);
+      const M = gesprekken.filter(g => g.type==='medewerker').length;
+      const S = gesprekken.filter(g => g.type==='stakeholder').length;
+      const PL = gesprekken.filter(g => g.type==='parketleiding').length;
+
+      return (
+        <div>
+          {/* Page header */}
+          <div style={{ marginBottom:24 }}>
+            <div style={{ fontFamily:"'Lora',serif", fontSize:24, fontWeight:700, color:C.navy, marginBottom:4 }}>
+              Afdelingsontwikkeling B&S
+            </div>
+            <div style={{ fontSize:13, color:C.mid }}>OM Parket Den Haag · 2026</div>
+          </div>
+
+          {/* Status banner */}
+          {aktief && (
+            <div style={{ background:C.navy, borderRadius:12, padding:'16px 22px', marginBottom:24, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 }}>
+              <div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,0.5)', marginBottom:3 }}>Je zit nu in</div>
+                <div style={{ fontFamily:"'Lora',serif", fontSize:16, fontWeight:700, color:C.white }}>
+                  {aktief.label} — {aktief.titel}
+                </div>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)', marginTop:3 }}>{aktief.beschrijving}</div>
+              </div>
+              <div style={{ display:'flex', gap:20 }}>
+                {[['Medewerkers',M],['Stakeholders',S],['Parketleiding',PL],['Bronnen',bronnen.length]].map(([lbl,val]) => (
+                  <div key={lbl} style={{ textAlign:'center' }}>
+                    <div style={{ fontSize:24, fontWeight:700, color:C.white, lineHeight:1 }}>{val}</div>
+                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.45)', marginTop:3 }}>{lbl}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Fase markering */}
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:20, flexWrap:'wrap' }}>
+            <span style={{ fontSize:12, color:C.mid }}>Actieve fase:</span>
+            {FASE_DEF.map(f => (
+              <button key={f.id} onClick={() => setFase(f.id)}
+                style={{ padding:'5px 12px', borderRadius:20, fontSize:11, fontWeight:600, border:`1.5px solid ${activeFase===f.id ? C.navy : C.border}`, background: activeFase===f.id ? C.navy : C.white, color: activeFase===f.id ? C.white : C.mid, cursor:'pointer', transition:'all 0.15s' }}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Fase kaarten */}
+          {FASE_DEF.map(fase => {
+            const st = getFaseStatus(fase);
+            const style = STATUS_STYLE[st];
+            const { done, total } = faseProgress(fase);
+            const isOpen = openFase === fase.id;
+
+            return (
+              <div key={fase.id} style={{ background: st==='actief' ? C.white : st==='afgerond' ? C.greenLt : C.creamDk, border:`1.5px solid ${style.border}`, borderRadius:12, marginBottom:10, overflow:'hidden', boxShadow: st==='actief' ? '0 2px 12px rgba(26,48,87,0.1)' : 'none' }}>
+                {/* Header */}
+                <div style={{ padding:'14px 18px', cursor:'pointer', display:'flex', alignItems:'flex-start', gap:14 }} onClick={() => setOpenFase(isOpen ? null : fase.id)}>
+                  <div style={{ background: st==='actief' ? C.navy : st==='afgerond' ? C.green : C.border, color:C.white, borderRadius:8, padding:'4px 10px', fontSize:11, fontWeight:700, flexShrink:0, marginTop:2 }}>
+                    {fase.label}
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                      <div>
+                        <div style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.navy, marginBottom:2 }}>{fase.titel}</div>
+                        <div style={{ fontSize:11, color:C.mid }}>{fase.beschrijving}</div>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0, marginLeft:12 }}>
+                        <span style={{ fontSize:11, fontWeight:600, color:style.color, background:style.bg, border:`1px solid ${style.border}`, padding:'3px 10px', borderRadius:20 }}>
+                          {st==='afgerond' ? '✓ Afgerond' : st==='actief' ? '● Actief' : '○ Open'}
+                        </span>
+                        <span style={{ color:C.light, fontSize:16 }}>{isOpen ? '−' : '+'}</span>
+                      </div>
+                    </div>
+                    {st !== 'open' && (
+                      <div style={{ marginTop:8, display:'flex', alignItems:'center', gap:8 }}>
+                        <div style={{ flex:1, height:4, background:C.creamDk, borderRadius:2, overflow:'hidden' }}>
+                          <div style={{ width:`${(done/total)*100}%`, height:'100%', background: st==='afgerond' ? C.green : C.navyLt, borderRadius:2 }} />
+                        </div>
+                        <span style={{ fontSize:10, color:C.mid }}>{done}/{total}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Body */}
+                {isOpen && (
+                  <div style={{ padding:'0 18px 18px', borderTop:`1px solid ${style.border}44` }} className="fade-in">
+                    <div style={{ paddingTop:14 }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:C.navy, marginBottom:10 }}>Stappen</div>
+                      {fase.checkItems.map((item, i) => {
+                        const key = `${fase.id}_${i}`;
+                        const done = !!checks[key];
+                        return (
+                          <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:10, marginBottom:8, cursor:'pointer' }}
+                            onClick={() => toggle(fase.id, i)}>
+                            <div style={{ width:18, height:18, borderRadius:5, flexShrink:0, marginTop:1, background: done ? C.green : C.white, border:`2px solid ${done ? C.green : C.border}`, display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.15s' }}>
+                              {done && <span style={{ color:C.white, fontSize:10, fontWeight:700 }}>✓</span>}
+                            </div>
+                            <span style={{ fontSize:13, color: done ? C.mid : C.text, textDecoration: done ? 'line-through' : 'none', lineHeight:1.4 }}>{item}</span>
+                          </div>
+                        );
+                      })}
+
+                      {/* Fase 1 live stats */}
+                      {fase.id === 'f1' && (
+                        <div style={{ marginTop:14, padding:'12px 14px', background:C.creamDk, borderRadius:8 }}>
+                          <div style={{ fontSize:11, fontWeight:700, color:C.navy, marginBottom:10 }}>Live voortgang</div>
+                          {[['Medewerkers',M,15,C.navyLt],['Stakeholders',S,6,C.gold],['Bronnen',bronnen.length,5,C.green]].map(([lbl,val,max,col]) => (
+                            <div key={lbl} style={{ marginBottom:8 }}>
+                              <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:C.mid, marginBottom:3 }}>
+                                <span>{lbl}</span><span>{val}/{max}</span>
+                              </div>
+                              <div style={{ height:6, background:C.white, borderRadius:3, overflow:'hidden' }}>
+                                <div style={{ width:`${Math.min((val/max)*100,100)}%`, height:'100%', background:col, borderRadius:3 }} />
+                              </div>
+                            </div>
+                          ))}
+                          <button onClick={() => onNav('gesprekken')} style={{ ...S.btnS, fontSize:11, padding:'5px 12px', marginTop:6 }}>→ Naar gesprekken</button>
+                        </div>
+                      )}
+
+                      {/* Fase 1B live stats */}
+                      {fase.id === 'f1b' && (
+                        <div style={{ marginTop:14, padding:'12px 14px', background:C.creamDk, borderRadius:8 }}>
+                          <div style={{ fontSize:11, fontWeight:700, color:C.navy, marginBottom:6 }}>Parketleidingsgesprekken</div>
+                          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                            <div style={{ flex:1, height:6, background:C.white, borderRadius:3, overflow:'hidden' }}>
+                              <div style={{ width:`${(PL/3)*100}%`, height:'100%', background:C.green, borderRadius:3 }} />
+                            </div>
+                            <span style={{ fontSize:11, color:C.mid }}>{PL}/3</span>
+                          </div>
+                          <button onClick={() => onNav('gesprekken')} style={{ ...S.btnS, fontSize:11, padding:'5px 12px', marginTop:8 }}>→ Parketleiding gesprek toevoegen</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
     // ─── INSTELLINGEN ─────────────────────────────────────────────────────────
     function InstellingenView({ apiKey, onSaveKey, gesprekken, bronnen, overleggen, onImport }) {
       const [key, setKey] = useState(apiKey);
@@ -1971,7 +2182,7 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
     function App() {
       const [apiKey, setApiKeyState] = useState(() => store.getApiKey());
       const [showSetup, setShowSetup] = useState(() => !store.getApiKey());
-      const [view, setView] = useState('gesprekken');
+      const [view, setView] = useState('dashboard');
       const [gesprekken, setGesprekken] = useState(() => store.loadGesprekken());
       const [bronnen, setBronnen] = useState(() => store.loadContext());
       const [overleggen, setOverleggen] = useState(() => store.loadOverleggen() || START_OVERLEGGEN);
@@ -1997,6 +2208,7 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
       if (showSetup) return <SetupView onSave={handleSaveKey} />;
 
       const navItems = [
+        { id:'dashboard',    label:'Dashboard',    },
         { id:'gesprekken',   label:'Gesprekken',   },
         { id:'patronen',     label:'Patronen',     },
         { id:'diagnose',     label:'Diagnose',     },
@@ -2025,6 +2237,7 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
             </div>
           </header>
           <main style={S.main}>
+            {view==='dashboard' && <DashboardView gesprekken={gesprekken} bronnen={bronnen} onNav={setView} />}
             {view==='gesprekken' && <GesprekkenView gesprekken={gesprekken} onNew={() => { setEditingId(null); setView('form'); }} onEdit={id => { setEditingId(id); setView('form'); }} onDelete={id => setGesprekken(prev => prev.filter(g => g.id!==id))} />}
             {view==='form' && <FormView gesprek={editingId ? gesprekken.find(g=>g.id===editingId) : null} onSave={handleSave} onCancel={() => { setEditingId(null); setView('gesprekken'); }} />}
             {view==='patronen' && <PatronenView gesprekken={gesprekken} apiKey={apiKey} />}
