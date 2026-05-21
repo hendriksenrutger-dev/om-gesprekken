@@ -1,0 +1,2276 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#1A3057" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="OM Gesprekken" />
+  <title>OM Gesprekken</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: #F6F2EA; color: #1C1C1C; -webkit-font-smoothing: antialiased; }
+    #root { min-height: 100vh; }
+    textarea, input, button { font-family: 'Inter', system-ui, sans-serif; }
+    textarea:focus, input:focus { outline: none; border-color: #1A3057 !important; box-shadow: 0 0 0 3px rgba(26,48,87,0.12) !important; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeIn 0.2s ease; }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #D5CFBF; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // ─── COLORS ───────────────────────────────────────────────────────────────
+    const C = {
+      navy:'#1A3057', navyDk:'#0F1E38', navyLt:'#2A4A7F',
+      cream:'#F6F2EA', creamDk:'#EDE8DF',
+      border:'#D5CFBF', gold:'#A67C00',
+      text:'#1C1C1C', mid:'#555', light:'#888',
+      green:'#2D6A4F', orange:'#B85C00', red:'#8B1A1A',
+      white:'#FFFFFF',
+    };
+
+    // ─── STORAGE (localStorage) ───────────────────────────────────────────────
+    const store = {
+      loadGesprekken:  () => { try { return JSON.parse(localStorage.getItem('om-gesprekken') || '[]'); } catch { return []; } },
+      saveGesprekken:  (d) => { try { localStorage.setItem('om-gesprekken', JSON.stringify(d)); } catch {} },
+      loadContext:     () => { try { return JSON.parse(localStorage.getItem('om-context') || '[]'); } catch { return []; } },
+      saveContext:     (d) => { try { localStorage.setItem('om-context', JSON.stringify(d)); } catch {} },
+      loadOverleggen:  () => { try { return JSON.parse(localStorage.getItem('om-overleggen') || 'null'); } catch { return null; } },
+      saveOverleggen:  (d) => { try { localStorage.setItem('om-overleggen', JSON.stringify(d)); } catch {} },
+      getApiKey:       () => localStorage.getItem('om-api-key') || '',
+      setApiKey:       (k) => localStorage.setItem('om-api-key', k),
+    };
+
+    // ─── CLAUDE API ───────────────────────────────────────────────────────────
+    async function claude(messages, system, apiKey) {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 8000, system, messages }),
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error.message);
+      return d.content?.map(b => b.text || '').join('\n') || '';
+    }
+
+    // ─── TEMPLATES ────────────────────────────────────────────────────────────
+    const TPL_A = [
+      { id:'p', title:'01 · Persoonlijk', hint:'Begin zelf — deel iets persoonlijks voordat je het vraagt', fields:[
+        { id:'pers_ach', label:'Achtergrond & loopbaan', rows:3 },
+        { id:'pers_stijl', label:'Werkstijl & energie — wat past, wat absoluut niet', rows:3 },
+      ]},
+      { id:'w', title:'02 · Werk en rol', hint:'Let op rolduidelijkheid: weet iemand wat er van hem/haar verwacht wordt?', fields:[
+        { id:'werk_uitleg', label:'Hoe legt iemand zijn werk uit aan iemand buiten het werk', rows:3 },
+        { id:'werk_sterk', label:'Sterktes — wat zou de afdeling missen', rows:2 },
+        { id:'werk_energ', label:'Energiegevers versus energievreters', rows:3 },
+      ]},
+      { id:'s', title:'03 · Samenwerking', hint:'Silovorming en frictiegebieden zitten hier tussen de regels', fields:[
+        { id:'sw_wie', label:'Met wie samengewerkt, hoe loopt dat', rows:3 },
+        { id:'sw_loopt', label:'Wat gaat vanzelf — wat kost elke keer moeite', rows:3 },
+        { id:'sw_zoekt', label:'Wie zoekt wie op', rows:2 },
+      ]},
+      { id:'b', title:'04 · Buiten en behoeften', hint:'Reactief of pro-actief patroon? Wie stuurt de agenda?', fields:[
+        { id:'buit_sh', label:'Stakeholders — weten die wat hij/zij voor ze kan doen', rows:3 },
+        { id:'buit_waarde', label:'Wanneer is er echt toegevoegde waarde — en wanneer niet', rows:3 },
+      ]},
+      { id:'a', title:'05 · De afdeling als geheel', hint:'De goudvraag aan het einde is het meest waardevol', fields:[
+        { id:'afd_goed', label:'Wat gaat goed / wat koesteren', rows:2 },
+        { id:'afd_anders', label:'Wat anders zou moeten', rows:3 },
+        { id:'afd_nodig', label:'Wat heeft hij/zij nodig om werk echt goed te doen', rows:2 },
+        { id:'afd_goud', label:'Goudvraag — wat ga ik onderschatten of niet meteen snappen', rows:3 },
+      ]},
+    ];
+
+    const TPL_B = [
+      { id:'c', title:'01 · Hun werk en context', hint:'Niet over jouw afdeling beginnen — eerst hun wereld begrijpen', fields:[
+        { id:'b_druk', label:'Grootste uitdagingen op dit moment — waar zit de druk', rows:3 },
+        { id:'b_jaar', label:'Wat moet er over een jaar beter zijn dan nu', rows:3 },
+      ]},
+      { id:'r', title:'02 · Raakvlakken met jouw afdeling', hint:'Latente behoeften zitten zelden in wat mensen spontaan noemen — doorvragen', fields:[
+        { id:'b_gebruik', label:'Waar maken ze gebruik van de afdeling — of zouden ze dat willen', rows:3 },
+        { id:'b_stokt', label:'Wat gaat goed — wat stokt', rows:3 },
+        { id:'b_latent', label:'Latente behoeften — wat willen ze maar vragen ze niet om, waarom niet', rows:4 },
+        { id:'b_gemist', label:'Wat hebben ze weleens gezocht en niet gevonden', rows:3 },
+      ]},
+      { id:'pe', title:'03 · Perceptie van de afdeling', hint:'Niet aanvechten of verdedigen — gewoon opnemen', fields:[
+        { id:'b_omschr', label:'Hoe omschrijven ze de afdeling aan een collega die er weinig van weet', rows:3 },
+        { id:'b_verwacht', label:'Wat verwachten ze — en wat juist niet', rows:3 },
+        { id:'b_verander', label:'Als ze één ding zouden veranderen aan hoe de afdeling werkt — wat dan', rows:3 },
+      ]},
+    ];
+
+    const DIAG_A = [
+      { id:'diag_rol',   label:'Rolduidelijkheid',    opts:['Helder','Vaag','Onduidelijk'],               colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_ori',   label:'Oriëntatie',           opts:['Buitengericht','Gemengd','Binnengericht'],   colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_eigen', label:'Eigenaarschap',        opts:['Sterk','Wisselend','Afwachtend'],            colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_inv',   label:'Informele invloed',    opts:['Ja','Deels','Nee'],                          colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_toon',  label:'Toon gesprek',         opts:['Positief','Neutraal','Kritisch','Gesloten'], colors:['#2D6A4F','#666','#B85C00','#8B1A1A'] },
+    ];
+
+    const DIAG_B = [
+      { id:'diag_kent',  label:'Kent afdeling goed?',           opts:['Ja','Gedeeltelijk','Nauwelijks'], colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_react', label:'Afdeling reactief of pro-actief?', opts:['Pro-actief','Wisselend','Reactief'], colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_toon',  label:'Toon gesprek',                  opts:['Positief','Neutraal','Kritisch'],  colors:['#2D6A4F','#666','#8B1A1A'] },
+    ];
+
+    const TPL_PL = [
+      { id:'strat', title:'01 · Strategische positie B&S', hint:"Geef ruimte — deze vragen zijn waarschijnlijk nog nooit zo gesteld. Als het antwoord vaag is: 'Wat zou het parket concreet missen als B&S er niet was?'", fields:[
+        { id:'pl_waarom',  label:'Waarom bestaat B&S — wat voegt de afdeling toe aan het parket?', rows:4 },
+        { id:'pl_missen',  label:'Wat zou het parket missen als B&S er niet was?', rows:3 },
+        { id:'pl_rol',     label:'Wat is de strategische functie die u van B&S verwacht — niet de taken, maar de rol?', rows:4 },
+      ]},
+      { id:'mandaat', title:'02 · Mandaat en bevoegdheden', hint:'Zonder mandaat kan B&S niet pro-actief zijn. Dit bepaalt of verandering ook echt mogelijk is.', fields:[
+        { id:'pl_bevoegd',  label:'Welke bevoegdheden en welk mandaat heeft B&S nodig om die rol waar te maken?', rows:4 },
+        { id:'pl_grenzen',  label:'Waar liggen de grenzen — wat valt buiten het mandaat van B&S?', rows:3 },
+        { id:'pl_verhouding', label:'Hoe verhoudt B&S zich tot andere afdelingen die raakvlakken hebben met deze rol?', rows:3 },
+      ]},
+      { id:'resultaat', title:'03 · Gewenst resultaat', hint:'', fields:[
+        { id:'pl_succes',  label:'Wat zou u over een jaar zien dat u vertelt dat het gelukt is?', rows:4 },
+        { id:'pl_verschil', label:'Wat is het verschil tussen B&S nu en B&S zoals u het voor ogen heeft?', rows:4 },
+        { id:'pl_weten',   label:'Zijn er zaken die u heeft gehoord of gezien die ik moet weten voor mijn diagnose?', rows:3 },
+      ]},
+      { id:'hyp', title:'04 · Toetsing functionele hypothese', hint:'Leg de drie elementen voor als hypothese — niet als voorstel. Luister of de parketleiding ze herkent, aanvult of verwerpt. Het antwoord bepaalt het DECIDE-moment.', fields:[
+        { id:'hyp_staf', label:'B&S als staf voor de parketleiding — bestuursondersteuning, parketbrede beleidsadvisering, communicatie. Herkent u dat als kern van wat u van B&S verwacht?', rows:4 },
+        { id:'hyp_teams', label:'B&S als beleidsmatige ondersteuning dicht op de operationele teams — thematisch, op onderwerpen die de grenzen van één team overstijgen. Is dat wat teamleiders en rechercheofficieren van B&S mogen verwachten — of hoort dat elders thuis?', rows:4 },
+        { id:'hyp_verwerving', label:'B&S als bewaker van de verwervingsstrategie als geheel — niet zelf verwerven maar bewaken dat parallelle inspanningen samen kloppen binnen het productiekader. Wie is daar nu eigenaar van — en zou dat B&S moeten zijn?', rows:4 },
+        { id:'hyp_reactie', label:'Reactie op de hypothese als geheel — wat herkent men, wat niet, wat ontbreekt volgens de parketleiding om dit waar te maken?', rows:5 },
+      ]},
+    ];
+
+    const DIAG_PL = [
+      { id:'diag_pl_strat',  label:'Strategische functie benoemd?', opts:['Helder','Deels','Niet'],    colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_pl_mandaat', label:'Mandaat expliciet?',           opts:['Ja','Deels','Nee'],          colors:['#2D6A4F','#B85C00','#8B1A1A'] },
+      { id:'diag_pl_toon',   label:'Toon gesprek',                  opts:['Positief','Neutraal','Kritisch'], colors:['#2D6A4F','#666','#8B1A1A'] },
+    ];
+
+    const uid = () => Math.random().toString(36).slice(2,10);
+
+    function gesprekToText(g) {
+      const sections = g.type === 'medewerker' ? TPL_A : g.type === 'parketleiding' ? TPL_PL : TPL_B;
+      const diags    = g.type === 'medewerker' ? DIAG_A : g.type === 'parketleiding' ? DIAG_PL : DIAG_B;
+      let t = `=== ${g.type.toUpperCase()}: ${g.naam}${g.functie ? ` (${g.functie})` : ''}${g.cluster ? ` · ${g.cluster}` : ''} · ${g.datum} ===\n\n`;
+      sections.forEach(s => {
+        const body = s.fields.filter(f => g[f.id]?.trim()).map(f => `  ${f.label}:\n  ${g[f.id]}`).join('\n\n');
+        if (body) t += `${s.title}\n${body}\n\n`;
+      });
+      const diag = diags.filter(f => g[f.id]).map(f => `${f.label}: ${g[f.id]}`).join('  |  ');
+      if (diag) t += `Diagnose: ${diag}\n`;
+      if (g.spontaan) t += `Spontaan genoemd: ${g.spontaan}\n`;
+      if (g.regels) t += `Tussen de regels: ${g.regels}\n`;
+      if (g.kernbev) t += `Kernbevindingen: ${g.kernbev}\n`;
+      if (g.ontbreekt) t += `Wat ontbreekt nog: ${g.ontbreekt}\n`;
+      if (g.frustratie) t += `Frustratie: ${g.frustratie}\n`;
+      return t;
+    }
+
+    // ─── STYLES ───────────────────────────────────────────────────────────────
+    const S = {
+      app: { minHeight:'100vh', background:C.cream },
+      hdr: { background:C.navy, color:C.white, padding:'0 20px', position:'sticky', top:0, zIndex:100, boxShadow:'0 2px 12px rgba(0,0,0,0.2)' },
+      hdrIn: { maxWidth:900, margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'space-between', height:56 },
+      title: { fontFamily:"'Lora', Georgia, serif", fontSize:18, fontWeight:700, letterSpacing:'-0.3px' },
+      sub: { fontSize:11, color:'rgba(255,255,255,0.5)', marginTop:1 },
+      nav: { display:'flex', gap:4 },
+      navBtn: (a) => ({ padding:'8px 14px', borderRadius:6, border:'none', cursor:'pointer', fontSize:13, fontWeight:500, background: a ? 'rgba(255,255,255,0.15)' : 'transparent', color: a ? C.white : 'rgba(255,255,255,0.6)', transition:'all 0.15s' }),
+      main: { maxWidth:900, margin:'0 auto', padding:'24px 20px 80px' },
+      card: { background:C.white, borderRadius:10, border:`1px solid ${C.border}`, padding:20, marginBottom:12, cursor:'pointer', transition:'box-shadow 0.15s', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' },
+      secTitle: { fontFamily:"'Lora', Georgia, serif", fontSize:22, fontWeight:700, color:C.navy, marginBottom:6 },
+      label: { fontSize:13, fontWeight:600, color:C.navy, marginBottom:5, display:'block' },
+      hint: { fontSize:12, color:C.orange, marginBottom:8, fontStyle:'italic' },
+      ta: { width:'100%', border:`1px solid ${C.border}`, borderRadius:7, padding:'10px 12px', fontSize:14, color:C.text, background:C.white, resize:'vertical', lineHeight:1.6, transition:'border-color 0.15s, box-shadow 0.15s' },
+      inp: { width:'100%', border:`1px solid ${C.border}`, borderRadius:7, padding:'10px 12px', fontSize:14, color:C.text, background:C.white, transition:'border-color 0.15s, box-shadow 0.15s' },
+      btnP: { background:C.navy, color:C.white, border:'none', borderRadius:8, padding:'10px 22px', fontSize:14, fontWeight:600, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6, transition:'opacity 0.15s' },
+      btnS: { background:'transparent', color:C.navy, border:`1.5px solid ${C.navy}`, borderRadius:8, padding:'9px 20px', fontSize:14, fontWeight:600, cursor:'pointer', transition:'all 0.15s' },
+      pill: (col) => ({ display:'inline-block', padding:'2px 10px', borderRadius:20, fontSize:11, fontWeight:600, background:col+'22', color:col, border:`1px solid ${col}44`, marginRight:4 }),
+      secHdr: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 18px', background:C.navy, borderRadius:8, cursor:'pointer', userSelect:'none', marginBottom:0 },
+      secHdrTxt: { fontFamily:"'Lora', Georgia, serif", fontSize:15, fontWeight:700, color:C.white },
+      diagRow: { display:'flex', alignItems:'flex-start', gap:16, padding:'12px 0', borderBottom:`1px solid ${C.creamDk}` },
+      diagLbl: { fontSize:13, fontWeight:600, color:C.navy, width:150, flexShrink:0, paddingTop:6 },
+      diagOpts: { display:'flex', flexWrap:'wrap', gap:6 },
+      optBtn: (sel, col) => ({ padding:'7px 14px', borderRadius:20, border:`1.5px solid ${sel ? col : C.border}`, background: sel ? col+'18' : C.white, color: sel ? col : C.mid, fontSize:13, fontWeight: sel ? 600 : 400, cursor:'pointer', transition:'all 0.1s' }),
+      mcell: (col) => ({ width:22, height:22, borderRadius:4, background:col, display:'flex', alignItems:'center', justifyContent:'center', fontSize:9, fontWeight:700, color:C.white, flexShrink:0 }),
+      aiBox: { background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:24, whiteSpace:'pre-wrap', fontSize:14, lineHeight:1.8, color:C.text },
+      empty: { textAlign:'center', padding:'60px 20px', color:C.light },
+    };
+
+    // ─── SMALL COMPONENTS ─────────────────────────────────────────────────────
+    function Spinner() {
+      return <span style={{ display:'inline-block', width:15, height:15, border:'2px solid rgba(255,255,255,0.35)', borderTopColor:C.white, borderRadius:'50%', animation:'spin 0.7s linear infinite' }} />;
+    }
+
+    function TypeBadge({ type }) {
+      const color = type === 'medewerker' ? C.navyLt : type === 'parketleiding' ? C.green : C.gold;
+      const label = type === 'medewerker' ? 'Medewerker' : type === 'parketleiding' ? 'Parketleiding' : 'Stakeholder';
+      return <span style={S.pill(color)}>{label}</span>;
+    }
+
+    function Accordion({ title, hint, open, onToggle, children }) {
+      return (
+        <div style={{ marginBottom:16 }}>
+          <div style={S.secHdr} onClick={onToggle}>
+            <span style={S.secHdrTxt}>{title}</span>
+            <span style={{ color:'rgba(255,255,255,0.7)', fontSize:18 }}>{open ? '−' : '+'}</span>
+          </div>
+          {open && (
+            <div style={{ padding:'20px 0 4px', display:'flex', flexDirection:'column', gap:16 }} className="fade-in">
+              {hint && <div style={S.hint}>💡 {hint}</div>}
+              {children}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── SETUP SCREEN ─────────────────────────────────────────────────────────
+    function SetupView({ onSave }) {
+      const [key, setKey] = useState('');
+      return (
+        <div style={{ minHeight:'100vh', background:C.navy, display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
+          <div style={{ background:C.white, borderRadius:16, padding:40, maxWidth:440, width:'100%', boxShadow:'0 20px 60px rgba(0,0,0,0.3)' }}>
+            <div style={{ fontFamily:"'Lora', Georgia, serif", fontSize:26, fontWeight:700, color:C.navy, marginBottom:8 }}>OM Gesprekken</div>
+            <div style={{ fontSize:14, color:C.mid, marginBottom:28, lineHeight:1.6 }}>
+              Om patronenanalyse en bevindingsnotities te genereren heb je een Anthropic API-sleutel nodig. Je sleutel wordt lokaal opgeslagen en nooit gedeeld.
+            </div>
+            <label style={S.label}>Anthropic API-sleutel</label>
+            <input style={{ ...S.inp, marginBottom:8, fontFamily:'monospace', fontSize:13 }}
+              type="password" placeholder="sk-ant-..." value={key} onChange={e => setKey(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && key.startsWith('sk-') && onSave(key)} />
+            <div style={{ fontSize:12, color:C.light, marginBottom:24 }}>
+              Haal je sleutel op via <a href="https://console.anthropic.com" target="_blank" style={{ color:C.navyLt }}>console.anthropic.com</a>
+            </div>
+            <button style={{ ...S.btnP, width:'100%', justifyContent:'center' }}
+              onClick={() => key.startsWith('sk-') && onSave(key)} disabled={!key.startsWith('sk-')}>
+              Opslaan en starten
+            </button>
+            <div style={{ marginTop:16, fontSize:12, color:C.light, textAlign:'center' }}>
+              De app werkt ook zonder sleutel — alleen AI-functies zijn dan uitgeschakeld.
+            </div>
+            <button style={{ ...S.btnS, width:'100%', justifyContent:'center', marginTop:8, fontSize:13 }}
+              onClick={() => onSave('')}>Verder zonder sleutel</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── GESPREKKEN LIST ──────────────────────────────────────────────────────
+    function GesprekkenView({ gesprekken, onNew, onEdit, onDelete }) {
+      const [search, setSearch] = useState('');
+      const filtered = gesprekken.filter(g =>
+        !search || [g.naam, g.functie, g.cluster].some(v => v?.toLowerCase().includes(search.toLowerCase()))
+      );
+      return (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+            <div>
+              <div style={S.secTitle}>Gesprekken</div>
+              <div style={{ fontSize:13, color:C.mid }}>
+                {gesprekken.length} gesprekken · {gesprekken.filter(g => g.type==='medewerker').length} medewerkers · {gesprekken.filter(g => g.type==='stakeholder').length} stakeholders
+              </div>
+            </div>
+            <button style={S.btnP} onClick={onNew}>+ Nieuw gesprek</button>
+          </div>
+          {gesprekken.length > 3 && (
+            <input style={{ ...S.inp, marginBottom:16 }} placeholder="Zoeken…" value={search} onChange={e => setSearch(e.target.value)} />
+          )}
+          {filtered.length === 0 && (
+            <div style={S.empty}>
+              <div style={{ fontSize:40, marginBottom:12 }}>📋</div>
+              <div style={{ fontSize:16, fontWeight:600, marginBottom:6 }}>Nog geen gesprekken</div>
+              <div style={{ fontSize:14 }}>Voeg je eerste kennismakingsgesprek toe.</div>
+            </div>
+          )}
+          {filtered.map(g => {
+            const diags = g.type === 'medewerker' ? DIAG_A : DIAG_B;
+            return (
+              <div key={g.id} onClick={() => onEdit(g.id)}
+                style={{ ...S.card, borderLeft:`3px solid ${g.type==='medewerker' ? C.navyLt : g.type==='parketleiding' ? C.green : C.gold}` }}
+                onMouseEnter={e => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'}
+                onMouseLeave={e => e.currentTarget.style.boxShadow='0 1px 4px rgba(0,0,0,0.04)'}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:4 }}>
+                      <span style={{ fontFamily:"'Lora', serif", fontSize:16, fontWeight:700 }}>{g.naam || '(geen naam)'}</span>
+                      <TypeBadge type={g.type} />
+                    </div>
+                    <div style={{ fontSize:13, color:C.mid, marginBottom:8 }}>
+                      {[g.functie, g.cluster, g.datum].filter(Boolean).join(' · ')}
+                    </div>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
+                      {diags.filter(f => g[f.id]).map(f => {
+                        const idx = f.opts.indexOf(g[f.id]);
+                        return <span key={f.id} style={S.pill(f.colors[idx] || C.mid)}>{g[f.id]}</span>;
+                      })}
+                    </div>
+                  </div>
+                  <button onClick={e => { e.stopPropagation(); if(window.confirm('Gesprek verwijderen?')) onDelete(g.id); }}
+                    style={{ background:'none', border:'none', cursor:'pointer', color:C.light, fontSize:20, padding:'0 4px', lineHeight:1 }}>×</button>
+                </div>
+                {g.kernbev && (
+                  <div style={{ fontSize:13, color:C.mid, marginTop:8, paddingTop:8, borderTop:`1px solid ${C.creamDk}`, fontStyle:'italic' }}>
+                    "{g.kernbev.slice(0,120)}{g.kernbev.length>120?'…':''}"
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ─── FORM ─────────────────────────────────────────────────────────────────
+    function FormView({ gesprek, onSave, onCancel }) {
+      const [data, setData] = useState(gesprek || { type:'medewerker', naam:'', functie:'', cluster:'', datum:new Date().toISOString().slice(0,10) });
+      const [open, setOpen] = useState({ p:true });
+      const set = (k, v) => setData(d => ({ ...d, [k]:v }));
+      const toggle = id => setOpen(o => ({ ...o, [id]:!o[id] }));
+      const sections = data.type === 'medewerker' ? TPL_A : data.type === 'parketleiding' ? TPL_PL : TPL_B;
+      const diagFields = data.type === 'medewerker' ? DIAG_A : data.type === 'parketleiding' ? DIAG_PL : DIAG_B;
+
+      return (
+        <div className="fade-in">
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
+            <div style={S.secTitle}>{gesprek?.id ? 'Gesprek bewerken' : 'Nieuw gesprek'}</div>
+            <button style={S.btnS} onClick={onCancel}>← Terug</button>
+          </div>
+
+          {/* Basisgegevens */}
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20, marginBottom:16 }}>
+            <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:16 }}>Basisgegevens</div>
+            <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
+              {[['medewerker','👤 Medewerker'],['stakeholder','🤝 Stakeholder'],['parketleiding','🏛 Parketleiding']].map(([t,lbl]) => (
+                <button key={t} onClick={() => set('type',t)}
+                  style={{ flex:1, minWidth:120, padding:'10px', borderRadius:8, border:`2px solid ${data.type===t ? C.navy : C.border}`, background: data.type===t ? C.navy : C.white, color: data.type===t ? C.white : C.mid, fontWeight:600, fontSize:13, cursor:'pointer', transition:'all 0.15s' }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              {[['naam','Naam *'],['functie','Functie / rol'],['cluster','Cluster / afdeling'],['datum','Datum']].map(([k,l]) => (
+                <div key={k} style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                  <label style={S.label}>{l}</label>
+                  <input style={S.inp} type={k==='datum'?'date':'text'} value={data[k]||''} onChange={e => set(k,e.target.value)} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {sections.map(sec => (
+            <Accordion key={sec.id} title={sec.title} hint={sec.hint} open={!!open[sec.id]} onToggle={() => toggle(sec.id)}>
+              {sec.fields.map(f => (
+                <div key={f.id} style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                  <label style={S.label}>{f.label}</label>
+                  <textarea style={S.ta} rows={f.rows} value={data[f.id]||''} onChange={e => set(f.id,e.target.value)} />
+                </div>
+              ))}
+            </Accordion>
+          ))}
+
+          <Accordion title="Diagnose na gesprek" open={!!open.diag} onToggle={() => toggle('diag')}>
+            {diagFields.map(f => (
+              <div key={f.id} style={S.diagRow}>
+                <div style={S.diagLbl}>{f.label}</div>
+                <div style={S.diagOpts}>
+                  {f.opts.map((opt,i) => (
+                    <button key={opt} onClick={() => set(f.id, data[f.id]===opt ? '' : opt)}
+                      style={S.optBtn(data[f.id]===opt, f.colors[i])}>{opt}</button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div style={{ ...S.diagRow, borderBottom:'none' }}>
+              <div style={S.diagLbl}>Frustratie over</div>
+              <div style={{ flex:1 }}><input style={S.inp} value={data.frustratie||''} onChange={e => set('frustratie',e.target.value)} /></div>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              <label style={S.label}>Spontaan genoemd</label>
+              <textarea style={S.ta} rows={2} value={data.spontaan||''} onChange={e => set('spontaan',e.target.value)} />
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              <label style={S.label}>Tussen de regels</label>
+              <textarea style={S.ta} rows={2} value={data.regels||''} onChange={e => set('regels',e.target.value)} />
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              <label style={S.label}>Kernbevindingen</label>
+              <textarea style={S.ta} rows={3} value={data.kernbev||''} onChange={e => set('kernbev',e.target.value)} />
+            </div>
+            {data.type === 'parketleiding' && (
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                <label style={S.label}>Wat ontbreekt nog — wat moet doorgevraagd worden</label>
+                <textarea style={S.ta} rows={2} value={data.ontbreekt||''} onChange={e => set('ontbreekt',e.target.value)} />
+              </div>
+            )}
+            {data.type !== 'parketleiding' && (
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                <label style={S.label}>Frustratie over</label>
+                <input style={S.inp} value={data.frustratie||''} onChange={e => set('frustratie',e.target.value)} />
+              </div>
+            )}
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              <label style={S.label}>Follow-up / actiepunten</label>
+              <textarea style={S.ta} rows={2} value={data.followup||''} onChange={e => set('followup',e.target.value)} />
+            </div>
+          </Accordion>
+
+          <div style={{ display:'flex', gap:10, marginTop:8 }}>
+            <button style={S.btnP} onClick={() => onSave(data)}>Opslaan</button>
+            <button style={S.btnS} onClick={onCancel}>Annuleren</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── PATRONEN ─────────────────────────────────────────────────────────────
+    const MCOLS_A = [
+      { key:'diag_rol',   label:'Rol',  field:DIAG_A[0] },
+      { key:'diag_ori',   label:'Ori.', field:DIAG_A[1] },
+      { key:'diag_eigen', label:'Eig.', field:DIAG_A[2] },
+      { key:'diag_toon',  label:'Toon', field:DIAG_A[4] },
+    ];
+    const MCOLS_B = [
+      { key:'diag_kent',  label:'Kent',  field:DIAG_B[0] },
+      { key:'diag_react', label:'Reac.', field:DIAG_B[1] },
+      { key:'diag_toon',  label:'Toon',  field:DIAG_B[2] },
+    ];
+    const MCOLS_PL = [
+      { key:'diag_pl_strat',   label:'Strat.', field:DIAG_PL[0] },
+      { key:'diag_pl_mandaat', label:'Mand.',  field:DIAG_PL[1] },
+      { key:'diag_pl_toon',    label:'Toon',   field:DIAG_PL[2] },
+    ];
+
+    function contextToText(items) {
+      if (!items || items.length === 0) return '';
+      return items.filter(c => c.tekst?.trim()).map(c =>
+        `=== CONTEXT: ${c.label} ===\n${c.tekst}`
+      ).join('\n\n');
+    }
+
+    function PatronenView({ gesprekken, apiKey }) {
+      const [aiText, setAiText] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [tab, setTab] = useState('matrix');
+      const [err, setErr] = useState('');
+
+      const medewerkers  = gesprekken.filter(g => g.type==='medewerker');
+      const stakeholders = gesprekken.filter(g => g.type==='stakeholder');
+      const parketleiding = gesprekken.filter(g => g.type==='parketleiding');
+
+      const getColor = (g, key, field) => {
+        const val = g[key]; if (!val || !field) return C.creamDk;
+        const idx = field.opts.indexOf(val);
+        return idx >= 0 ? field.colors[idx] : C.border;
+      };
+
+      const analyze = async () => {
+        if (!apiKey) { setErr('Geen API-sleutel — voeg die toe via de instellingen.'); return; }
+        setLoading(true); setTab('ai'); setErr('');
+        try {
+          const text = gesprekken.map(gesprekToText).join('\n\n');
+          const result = await claude(
+            [{ role:'user', content:`Hier zijn de gespreksnotities:\n\n${text}\n\nAnalyseer de patronen. Gebruik deze structuur:\n\n**Wat mensen spontaan noemen**\n\n**Wat mensen nooit noemen**\n\n**Waar zit frustratie**\n\n**Waar zit energie**\n\n**Verschil medewerkers versus stakeholders**\n\n**4-6 spanningsvelden** (formuleer als: "Er is spanning tussen X en Y doordat Z")\n\nVerwijs naar concrete inhoud uit de notities. Analytisch, direct, geen opsmuk.` }],
+            'Je analyseert gesprekken voor een nieuw afdelingshoofd bij OM Parket Den Haag. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal.',
+            apiKey
+          );
+          setAiText(result);
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      if (gesprekken.length === 0) return (
+        <div style={S.empty}><div style={{ fontSize:40, marginBottom:12 }}>📊</div><div style={{ fontSize:16, fontWeight:600 }}>Nog geen gesprekken om te analyseren</div></div>
+      );
+
+      const MatrixTable = ({ rows, cols }) => (
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ borderCollapse:'separate', borderSpacing:'4px', width:'100%' }}>
+            <thead><tr>
+              <th style={{ textAlign:'left', fontSize:12, color:C.mid, fontWeight:600, paddingBottom:6, minWidth:110 }}>Naam</th>
+              {cols.map(c => <th key={c.key} style={{ fontSize:11, color:C.mid, fontWeight:600, paddingBottom:6, textAlign:'center', minWidth:32 }}>{c.label}</th>)}
+              <th style={{ textAlign:'left', fontSize:12, color:C.mid, fontWeight:600, paddingBottom:6, minWidth:150 }}>Kernbevinding</th>
+            </tr></thead>
+            <tbody>{rows.map(g => (
+              <tr key={g.id}>
+                <td style={{ fontSize:13, fontWeight:600, paddingRight:12, paddingBottom:6, whiteSpace:'nowrap' }}>{g.naam}</td>
+                {cols.map(c => (
+                  <td key={c.key} style={{ textAlign:'center', paddingBottom:6 }}>
+                    <div title={g[c.key]||'–'} style={{ ...S.mcell(getColor(g,c.key,c.field)), margin:'0 auto' }}>
+                      {g[c.key] ? g[c.key][0] : '·'}
+                    </div>
+                  </td>
+                ))}
+                <td style={{ fontSize:12, color:C.mid, paddingBottom:6, maxWidth:220, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {g.kernbev?.slice(0,80)||'–'}
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      );
+
+      return (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+            <div style={S.secTitle}>Patronen</div>
+            <button style={S.btnP} onClick={analyze} disabled={loading}>
+              {loading ? <><Spinner /> Analyseren…</> : '🔍 Analyseer patronen'}
+            </button>
+          </div>
+          {err && <div style={{ background:'#fff0f0', border:'1px solid #f5c2c2', borderRadius:8, padding:'10px 14px', fontSize:13, color:C.red, marginBottom:16 }}>{err}</div>}
+          <div style={{ display:'flex', gap:8, marginBottom:20 }}>
+            {['matrix','grafieken','ai'].map(t => (
+              <button key={t} onClick={() => setTab(t)}
+                style={{ ...S.btnS, background: tab===t ? C.navy : 'transparent', color: tab===t ? C.white : C.navy }}>
+                {t === 'matrix' ? '📋 Visuele matrix' : t === 'grafieken' ? '📊 Grafieken' : '🤖 AI-analyse'}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'matrix' && (
+            <div className="fade-in">
+              {medewerkers.length > 0 && (
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20, marginBottom:16 }}>
+                  <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:14 }}>Medewerkers ({medewerkers.length})</div>
+                  <MatrixTable rows={medewerkers} cols={MCOLS_A} />
+                  <div style={{ display:'flex', gap:16, marginTop:12, flexWrap:'wrap' }}>
+                    {MCOLS_A.map(c => (
+                      <div key={c.key} style={{ fontSize:11, color:C.mid }}>
+                        <strong>{c.label}</strong>:{c.field.opts.map((opt,i) => (
+                          <span key={opt} style={{ marginLeft:4 }}>
+                            <span style={{ display:'inline-block', width:10, height:10, borderRadius:2, background:c.field.colors[i], marginRight:2, verticalAlign:'middle' }}/>
+                            {opt}
+                          </span>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {parketleiding.length > 0 && (
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20, marginBottom:16 }}>
+                  <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:14 }}>Parketleiding ({parketleiding.length})</div>
+                  <MatrixTable rows={parketleiding} cols={MCOLS_PL} />
+                </div>
+              )}
+              {stakeholders.length > 0 && (
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20 }}>
+                  <div style={{ fontFamily:"'Lora', serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:14 }}>Stakeholders ({stakeholders.length})</div>
+                  <MatrixTable rows={stakeholders} cols={MCOLS_B} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'grafieken' && <GrafiekenView medewerkers={medewerkers} stakeholders={stakeholders} parketleiding={parketleiding} />}
+
+          {tab === 'ai' && (
+            <div className="fade-in">
+              {loading && <div style={{ textAlign:'center', padding:40, color:C.mid, fontSize:14 }}>Patronen worden geanalyseerd…</div>}
+              {!loading && aiText && <div style={S.aiBox}>{aiText}</div>}
+              {!loading && !aiText && <div style={S.empty}><div style={{ fontSize:14 }}>Klik op "Analyseer patronen" om te starten.</div></div>}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── GRAFIEKEN ────────────────────────────────────────────────────────────
+    function DonutChart({ title, data, size = 140 }) {
+      const total = data.reduce((s, d) => s + d.value, 0);
+      if (total === 0) return null;
+      const cx = size / 2, cy = size / 2, r = size * 0.36, inner = size * 0.22;
+      let angle = -Math.PI / 2;
+      const slices = data.filter(d => d.value > 0).map(d => {
+        const start = angle;
+        angle += (d.value / total) * 2 * Math.PI;
+        return { ...d, start, end: angle };
+      });
+
+      const arc = (s, e, ro, ri) => {
+        const x1 = cx + ro * Math.cos(s), y1 = cy + ro * Math.sin(s);
+        const x2 = cx + ro * Math.cos(e), y2 = cy + ro * Math.sin(e);
+        const x3 = cx + ri * Math.cos(e), y3 = cy + ri * Math.sin(e);
+        const x4 = cx + ri * Math.cos(s), y4 = cy + ri * Math.sin(s);
+        const large = e - s > Math.PI ? 1 : 0;
+        return `M ${x1} ${y1} A ${ro} ${ro} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${ri} ${ri} 0 ${large} 0 ${x4} ${y4} Z`;
+      };
+
+      return (
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10 }}>
+          <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.navy, textAlign:'center' }}>{title}</div>
+          <svg width={size} height={size}>
+            {slices.map((s, i) => <path key={i} d={arc(s.start, s.end, r, inner)} fill={s.color} opacity={0.9} />)}
+            <text x={cx} y={cy + 4} textAnchor="middle" fontSize={size * 0.14} fontWeight="700" fill={C.navy}>{total}</text>
+          </svg>
+          <div style={{ display:'flex', flexDirection:'column', gap:4, width:'100%' }}>
+            {data.filter(d => d.value > 0).map((d, i) => (
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:6, fontSize:11 }}>
+                <div style={{ width:10, height:10, borderRadius:2, background:d.color, flexShrink:0 }} />
+                <span style={{ color:C.mid, flex:1 }}>{d.label}</span>
+                <span style={{ fontWeight:700, color:C.navy }}>{d.value}</span>
+                <span style={{ color:C.light }}>({Math.round(d.value/total*100)}%)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    function BarChart({ title, groups }) {
+      const max = Math.max(...groups.map(g => g.values.reduce((s,v) => s+v, 0)), 1);
+      return (
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.navy }}>{title}</div>
+          {groups.map((g, i) => {
+            const total = g.values.reduce((s,v) => s+v, 0);
+            return (
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <div style={{ fontSize:11, color:C.navy, fontWeight:600, width:90, flexShrink:0, textAlign:'right' }}>{g.label}</div>
+                <div style={{ flex:1, display:'flex', height:22, borderRadius:4, overflow:'hidden', gap:1 }}>
+                  {g.values.map((v, j) => v > 0 ? (
+                    <div key={j} style={{ flex:v, background:g.colors[j], display:'flex', alignItems:'center', justifyContent:'center' }}>
+                      <span style={{ fontSize:9, fontWeight:700, color:C.white }}>{v}</span>
+                    </div>
+                  ) : null)}
+                  {total === 0 && <div style={{ flex:1, background:C.creamDk }} />}
+                </div>
+                <div style={{ fontSize:10, color:C.light, width:20, textAlign:'right' }}>{total}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function GrafiekenView({ medewerkers, stakeholders }) {
+      const chartRef = React.useRef();
+
+      const count = (arr, key, opts) => opts.map(o => arr.filter(g => g[key] === o).length);
+
+      const exportCharts = () => {
+        const el = chartRef.current;
+        if (!el) return;
+
+        const win = window.open('', '_blank');
+        if (!win) {
+          alert('Pop-up geblokkeerd. Sta pop-ups toe voor deze site en probeer opnieuw.');
+          return;
+        }
+
+        win.document.write(`<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>OM Gesprekken — Grafieken</title>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: #fff; color: #1C1C1C; padding: 40px; max-width: 960px; margin: 0 auto; }
+  h1 { font-family: 'Lora', serif; font-size: 22px; color: #1A3057; margin-bottom: 4px; }
+  .sub { font-size: 12px; color: #888; margin-bottom: 32px; padding-bottom: 16px; border-bottom: 2px solid #D5CFBF; }
+  .print-btn { position: fixed; top: 20px; right: 20px; background: #1A3057; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif; }
+  .print-btn:hover { background: #2A4A7F; }
+  @media print { .print-btn { display: none; } body { padding: 20px; } }
+</style>
+</head>
+<body>
+<button class="print-btn" onclick="window.print()">🖨 Print / Sla op als PDF</button>
+<h1>OM Parket Den Haag — Gesprekken overzicht</h1>
+<div class="sub">Gegenereerd op ${new Date().toLocaleDateString('nl-NL', { day:'numeric', month:'long', year:'numeric' })} · ${medewerkers.length} medewerkers · ${stakeholders.length} stakeholders</div>
+${el.innerHTML}
+</body>
+</html>`);
+        win.document.close();
+      };
+
+      const mRol   = count(medewerkers, 'diag_rol',   DIAG_A[0].opts);
+      const mOri   = count(medewerkers, 'diag_ori',   DIAG_A[1].opts);
+      const mEigen = count(medewerkers, 'diag_eigen', DIAG_A[2].opts);
+      const mToon  = count(medewerkers, 'diag_toon',  DIAG_A[4].opts);
+      const sKent  = count(stakeholders,'diag_kent',  DIAG_B[0].opts);
+      const sReact = count(stakeholders,'diag_react', DIAG_B[1].opts);
+      const sToon  = count(stakeholders,'diag_toon',  DIAG_B[2].opts);
+
+      const total = medewerkers.length + stakeholders.length;
+
+      return (
+        <div className="fade-in">
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+            <div style={{ fontSize:13, color:C.mid }}>{total} gesprekken · {medewerkers.length} medewerkers · {stakeholders.length} stakeholders</div>
+            <button style={S.btnS} onClick={exportCharts}>🖨 Exporteer / Print</button>
+          </div>
+
+          <div ref={chartRef} style={{ background:C.cream, padding:24, borderRadius:12, border:`1px solid ${C.border}` }}>
+            {/* Overzicht */}
+            <div style={{ fontFamily:"'Lora',serif", fontSize:16, fontWeight:700, color:C.navy, marginBottom:20, paddingBottom:10, borderBottom:`2px solid ${C.border}` }}>
+              OM Parket Den Haag — Gesprekken overzicht
+            </div>
+
+            {/* Type verdeling */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))', gap:24, marginBottom:32 }}>
+              <DonutChart title="Type gesprekken" size={130} data={[
+                { label:'Medewerkers', value:medewerkers.length, color:C.navyLt },
+                { label:'Stakeholders', value:stakeholders.length, color:C.gold },
+              ]} />
+              {medewerkers.length > 0 && <DonutChart title="Rolduidelijkheid" size={130} data={DIAG_A[0].opts.map((o,i) => ({ label:o, value:mRol[i], color:DIAG_A[0].colors[i] }))} />}
+              {medewerkers.length > 0 && <DonutChart title="Oriëntatie" size={130} data={DIAG_A[1].opts.map((o,i) => ({ label:o, value:mOri[i], color:DIAG_A[1].colors[i] }))} />}
+              {medewerkers.length > 0 && <DonutChart title="Eigenaarschap" size={130} data={DIAG_A[2].opts.map((o,i) => ({ label:o, value:mEigen[i], color:DIAG_A[2].colors[i] }))} />}
+              {medewerkers.length > 0 && <DonutChart title="Toon medewerkers" size={130} data={DIAG_A[4].opts.map((o,i) => ({ label:o, value:mToon[i], color:DIAG_A[4].colors[i] }))} />}
+              {stakeholders.length > 0 && <DonutChart title="Kent afdeling?" size={130} data={DIAG_B[0].opts.map((o,i) => ({ label:o, value:sKent[i], color:DIAG_B[0].colors[i] }))} />}
+              {stakeholders.length > 0 && <DonutChart title="Reactief/Pro-actief" size={130} data={DIAG_B[1].opts.map((o,i) => ({ label:o, value:sReact[i], color:DIAG_B[1].colors[i] }))} />}
+              {stakeholders.length > 0 && <DonutChart title="Toon stakeholders" size={130} data={DIAG_B[2].opts.map((o,i) => ({ label:o, value:sToon[i], color:DIAG_B[2].colors[i] }))} />}
+            </div>
+
+            {/* Staafdiagram per cluster */}
+            {medewerkers.length > 0 && (() => {
+              const clusters = [...new Set(medewerkers.map(g => g.cluster).filter(Boolean))];
+              if (clusters.length < 2) return null;
+              return (
+                <div style={{ marginBottom:24 }}>
+                  <BarChart title="Rolduidelijkheid per cluster" groups={clusters.map(cl => {
+                    const m = medewerkers.filter(g => g.cluster === cl);
+                    return { label:cl, values:DIAG_A[0].opts.map(o => m.filter(g => g.diag_rol===o).length), colors:DIAG_A[0].colors };
+                  })} />
+                </div>
+              );
+            })()}
+
+            {/* Legenda */}
+            <div style={{ display:'flex', gap:16, flexWrap:'wrap', paddingTop:12, borderTop:`1px solid ${C.border}` }}>
+              {[[C.green,'Positief/Sterk/Helder'],[C.orange,'Wisselend/Gemengd/Vaag'],[C.red,'Zorgelijk/Laag']].map(([col,lbl]) => (
+                <div key={lbl} style={{ display:'flex', alignItems:'center', gap:5, fontSize:10, color:C.mid }}>
+                  <div style={{ width:10, height:10, borderRadius:2, background:col }}/>
+                  {lbl}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── NOTITIE ──────────────────────────────────────────────────────────────
+    function NotitieView({ gesprekken, apiKey }) {
+      const [notitie, setNotitie] = useState('');
+      const [history, setHistory] = useState([]);
+      const [input, setInput] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [err, setErr] = useState('');
+
+      const SYS = 'Je schrijft een bevindingsnotitie voor een nieuw afdelingshoofd bij OM Parket Den Haag. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal, geen overbodige opsmuk. Maximaal 1 A4.';
+
+      const generate = async () => {
+        if (!apiKey) { setErr('Geen API-sleutel — voeg die toe via de instellingen.'); return; }
+        setLoading(true); setErr('');
+        const text = gesprekken.map(gesprekToText).join('\n\n');
+        const prompt = `Schrijf een bevindingsnotitie op basis van deze kennismakingsgesprekken:\n\n${text}\n\nStructuur:\n\n**Wat gaat goed** (2-3 concrete patronen)\n\n**Spanningsvelden** (4-6 specifieke fricties, geformuleerd als spanning niet als oordeel)\n\n**Wat externe stakeholders zeggen** (alleen als er stakeholdergesprekken zijn)\n\n**Conclusie en richting** (3-5 zinnen, geen oplossingen, alleen bevindingen)\n\nGeen oplossingen. Alleen bevindingen. Directe taal.`;
+        try {
+          const msgs = [{ role:'user', content:prompt }];
+          const result = await claude(msgs, SYS, apiKey);
+          setNotitie(result);
+          setHistory([...msgs, { role:'assistant', content:result }]);
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      const refine = async () => {
+        if (!input.trim() || !notitie || !apiKey) return;
+        setLoading(true);
+        const newH = [...history, { role:'user', content:input }];
+        try {
+          const result = await claude(newH, SYS, apiKey);
+          setNotitie(result);
+          setHistory([...newH, { role:'assistant', content:result }]);
+          setInput('');
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      if (gesprekken.length === 0) return (
+        <div style={S.empty}><div style={{ fontSize:40, marginBottom:12 }}>📝</div><div style={{ fontSize:16, fontWeight:600 }}>Nog geen gesprekken</div></div>
+      );
+
+      return (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+            <div>
+              <div style={S.secTitle}>Bevindingsnotitie</div>
+              <div style={{ fontSize:13, color:C.mid }}>Op basis van {gesprekken.length} gesprekken · max 1 A4</div>
+            </div>
+            <button style={S.btnP} onClick={generate} disabled={loading}>
+              {loading ? <><Spinner /> Schrijven…</> : notitie ? '↻ Regenereer' : 'Genereer notitie'}
+            </button>
+          </div>
+
+          {err && <div style={{ background:'#fff0f0', border:'1px solid #f5c2c2', borderRadius:8, padding:'10px 14px', fontSize:13, color:C.red, marginBottom:16 }}>{err}</div>}
+
+          {!notitie && !loading && (
+            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:40, textAlign:'center', color:C.mid }}>
+              <div style={{ fontSize:36, marginBottom:12 }}>✍️</div>
+              <div style={{ fontSize:14 }}>Klik op "Genereer notitie" om een conceptbevindingsnotitie te schrijven op basis van alle gesprekken.</div>
+            </div>
+          )}
+
+          {loading && <div style={{ textAlign:'center', padding:40, color:C.mid, fontSize:14 }}>Notitie wordt geschreven…</div>}
+
+          {notitie && !loading && (
+            <div className="fade-in">
+              <div style={S.aiBox}>{notitie}</div>
+
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20, marginTop:16 }}>
+                <div style={{ fontFamily:"'Lora', serif", fontSize:14, fontWeight:700, color:C.navy, marginBottom:12 }}>Aanpassing of aanvulling geven</div>
+                {history.filter(m => m.role==='user').slice(1).map((m,i) => (
+                  <div key={i} style={{ fontSize:12, color:C.mid, padding:'6px 10px', background:C.creamDk, borderRadius:6, marginBottom:6 }}>↳ {m.content}</div>
+                ))}
+                <div style={{ display:'flex', gap:10 }}>
+                  <input style={{ ...S.inp, flex:1 }}
+                    placeholder="Bijv: 'Maak de spanningsvelden concreter' of 'Voeg iets toe over communicatie'"
+                    value={input} onChange={e => setInput(e.target.value)}
+                    onKeyDown={e => e.key==='Enter' && !e.shiftKey && refine()} />
+                  <button style={S.btnP} onClick={refine} disabled={loading || !input.trim()}>
+                    {loading ? <Spinner /> : 'Pas aan'}
+                  </button>
+                </div>
+                <div style={{ fontSize:12, color:C.light, marginTop:8 }}>Je kunt meerdere aanpassingen doen — Claude houdt de context bij.</div>
+              </div>
+
+              <div style={{ marginTop:16, display:'flex', gap:8 }}>
+                <button style={S.btnS} onClick={() => navigator.clipboard?.writeText(notitie)}>📋 Kopieer tekst</button>
+                <button style={{ ...S.btnS, color:C.light, borderColor:C.border }}
+                  onClick={() => { setNotitie(''); setHistory([]); }}>Wis notitie</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── DIAGNOSE VIEW ────────────────────────────────────────────────────────
+    const BRON_SUGGESTIONS = [
+      'Opdracht hoofdofficier',
+      'Intranetbeschrijving afdeling',
+      'Eigen bevindingen',
+      'O&F-plan (samenvatting)',
+      'Overig',
+    ];
+
+    function DiagnoseView({ gesprekken, bronnen, onBronnenChange, apiKey }) {
+      const [diagnose, setDiagnose] = useState(() => {
+        try { return localStorage.getItem('om-diagnose') || ''; } catch { return ''; }
+      });
+      const [history, setHistory] = useState([]);
+      const [input, setInput] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [err, setErr] = useState('');
+      const [editingId, setEditingId] = useState(null);
+
+      const saveDiagnose = (d) => {
+        setDiagnose(d);
+        try { localStorage.setItem('om-diagnose', d); } catch {}
+      };
+
+      const addBron = (label) => {
+        const item = { id: uid(), label, tekst: '' };
+        onBronnenChange([...bronnen, item]);
+        setEditingId(item.id);
+      };
+
+      const pdfRef = React.useRef();
+
+      const uploadPdf = async (e) => {
+        const file = e.target.files[0];
+        if (!file || !apiKey) return;
+        e.target.value = '';
+        const label = file.name.replace('.pdf','');
+        const loadingId = uid();
+        onBronnenChange(prev => [...prev, { id: loadingId, label, tekst: '⏳ PDF wordt gelezen…' }]);
+        setEditingId(loadingId);
+
+        try {
+          const base64 = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload = () => res(r.result.split(',')[1]);
+            r.onerror = rej;
+            r.readAsDataURL(file);
+          });
+
+          const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'anthropic-dangerous-direct-browser-access': 'true',
+            },
+            body: JSON.stringify({
+              model: 'claude-sonnet-4-5',
+              max_tokens: 4000,
+              messages: [{
+                role: 'user',
+                content: [
+                  { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+                  { type: 'text', text: 'Extraheer de volledige tekst uit dit document. Geef alleen de tekst terug, geen commentaar of samenvatting. Behoud de structuur zo goed mogelijk.' }
+                ]
+              }]
+            })
+          });
+          const data = await response.json();
+          if (data.error) throw new Error(data.error.message);
+          const tekst = data.content?.map(b => b.text || '').join('\n') || '';
+          onBronnenChange(prev => prev.map(b => b.id === loadingId ? { ...b, tekst } : b));
+        } catch(err) {
+          onBronnenChange(prev => prev.map(b => b.id === loadingId ? { ...b, tekst: `Fout bij lezen PDF: ${err.message}` } : b));
+        }
+      };
+
+      const updateBron = (id, field, val) => {
+        onBronnenChange(bronnen.map(b => b.id === id ? { ...b, [field]: val } : b));
+      };
+
+      const removeBron = (id) => {
+        if (window.confirm('Dit bronblok verwijderen?')) onBronnenChange(bronnen.filter(b => b.id !== id));
+      };
+
+      const SYS = `Je helpt een nieuw afdelingshoofd bij OM Parket Den Haag een diagnose stellen en een notitie schrijven. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal.
+
+Achtergrond: het afdelingshoofd werkt volgens een gefaseerd ontwikkeltraject voor OM Parket Den Haag. De afdeling heeft vijf clusters: beleidsondersteuning & advies, gebiedsgericht werken, intelligence & ondermijning, communicatie, en bureau juridische zaken. Één teamleider. Geen clustercoördinatoren.
+
+Het traject kent de volgende fasen:
+
+Fase 0 — Mandate ophalen bij hoofdofficier. Product: bevestigde opdracht + rolverdeling teamleider.
+
+Fase 1 — Diagnose & kennismakingen. Gesprekken met alle medewerkers en een selectie stakeholders. Product: bevindingsnotitie (1 A4) + gespreksnotities.
+
+Fase 1B — Parketleiding, MT en afdeling. Individuele interviews met de drie leden van de parketleiding (hoofdofficier, plaatsvervangend hoofdofficier, directeur bedrijfsvoering). Daarna DECIDE-moment met hoofdofficier — twee onderdelen: scenariokeuze én commitmentgesprek over wat de parketleiding zelf anders gaat doen. Dan MT-communicatie als commitmentgesprek. Dan afdeling informeren met volledig verhaal — niet wat er mis is, maar wat B&S gaat worden.
+
+Fase 1C — Positionering en taakomschrijving. Vóór de clusters aan het werk gaan: positiedocument vastgesteld door hoofdofficier (waarvoor bestaat B&S, waar leidend, waar dienend). Voorlopige taakomschrijving per cluster — taken horen bij functies, niet bij personen. Clusters informeren met kader voordat ze naar buiten gaan.
+
+Fase 2 — Clusters voeren stakeholdergesprekken binnen kaders van het afdelingshoofd. Product: clusterverslagen + gezamenlijk beeld.
+
+Fase 3 — Afdelingsdocument. Missie, leidende principes, rolverwachtingen per cluster. Product: beschrijvend afdelingsdocument (3-4 pagina's).
+
+Fase 4 — Borging. Overlegstructuur, gedragsindicatoren, bijsturing na 6 maanden.
+
+Na fase 1 volgt een DECIDE-moment met de hoofdofficier op basis van twee scenario's:
+Scenario A: volledig traject.
+Scenario B: gericht traject — alleen betrokken clusters.
+
+Analytisch kader — verwerk dit altijd in de diagnose:
+
+1. Het probleem ligt niet alleen bij B&S maar ook bij hoe het parket B&S aanstuurt. De sturingsverantwoordelijkheid van de parketleiding is onderdeel van de diagnose — niet alleen intern falen van de afdeling. Dit krijgt een prominente positie, niet een voetnoot.
+
+2. De volgorde is altijd: eerst definiëren waarvoor B&S bestaat (conceptueel), dan pas beoordelen of de inrichting klopt (structureel). Nooit andersom. Wie begint met herindelen zonder dat de inhoudelijke positie helder is, bouwt op drijfzand.
+
+3. De centrale hypothese is: B&S geeft focus aan het parket — soms leidend, soms dienend. Dit is een hypothese die getoetst wordt via de gesprekken, geen vaststaande conclusie. Introduceer het niet als feit maar laat het bevestigd of ontkracht worden door wat mensen zeggen.
+
+4. De diagnose meet effect, niet inspanning. Niet hoeveel overleggen of klachten afgehandeld — maar of het parket er beter van wordt.
+
+5. Er is een patroon van functie-aanpassing: taken worden verschoven of herverdeeld omdat ze niet passen bij de persoonlijke voorkeur of privésituatie van medewerkers. Dit is geen gebrek aan rolduidelijkheid — dit is het ontbreken van een norm dat functies gesteld worden door organisatiebehoefte, niet door persoonlijke voorkeur. Dit patroon wordt expliciet benoemd in de diagnose en doorbroken in fase 1C.
+
+6. Laag commitment heeft twee lagen. Eén: mensen weten niet waarop ze zich moeten committeren. Twee: als ze het wel weten maar het niet willen, wordt dat geaccepteerd. De tweede laag is zwaarder dan de eerste — die zit in de cultuur en in hoe er leiding is gegeven.
+
+7. De diagnose sluit altijd af met expliciete toetsvragen: wat moet aan het einde van fase 1 beantwoord zijn dat nu nog onbekend is? Dit zijn de vragen die het DECIDE-moment mogelijk maken.
+
+8. De diagnose erkent altijd wat er wel goed is — niet als suikerlaagje maar als eerlijke context. Vakmanschap, betrokkenheid en goede werkrelaties zijn reële activa die in de diagnose worden benoemd. Een afdeling zonder gedeelde opdracht is iets anders dan een afdeling die niet werkt. De formulering weerspiegelt dat onderscheid. Structurele problemen worden scherp benoemd, maar altijd in de context van mensen die hard werken en betrokken zijn. De diagnose beschrijft wat ontbreekt — niet wat er niet deugt.
+
+9. De intranetpagina van B&S beschrijft correct waarvoor de afdeling bestaat — behandel die niet als een opsomming van taken zonder betekenis. De kritiek geldt het jaarplan, niet de intranetbeschrijving. Het onderscheid is: de missie bestaat en is correct beschreven, maar wordt niet vertaald naar meetbare uitkomsten in de planning en niet werkend gemaakt via sturingslijnen en overlegstructuren.
+
+Belangrijk: stel geen acties voor die buiten het traject vallen. De diagnose is een analysedocument, geen interventieplan. Fase 1C — positionering en taakomschrijving — is een expliciete stap die pas plaatsvindt nadat de parketleiding zich heeft gecommitteerd. Niet eerder.`;
+
+      const buildPrompt = () => {
+        const gesprekkenText = gesprekken.map(gesprekToText).join('\n\n');
+        const bronText = bronnen.filter(b => b.tekst?.trim())
+          .map(b => `=== ${b.label.toUpperCase()} ===\n${b.tekst}`).join('\n\n');
+
+        return `Je bent een scherpe organisatieadviseur die een diagnose stelt van een afdeling bij OM Parket Den Haag. De diagnose moet eerlijk, analytisch en direct zijn — geen diplomatieke omwegen, geen actieadviezen, geen stappenplannen.
+
+Hieronder staan gespreksnotities én aanvullende bronnen inclusief de eigen observaties van het afdelingshoofd. Eigen observaties zijn primaire input — niet een bijlage.
+
+${gesprekkenText ? `## GESPREKSNOTITIES (${gesprekken.length} gesprekken)\n\n${gesprekkenText}` : ''}
+${bronText ? `\n\n## AANVULLENDE BRONNEN EN EIGEN OBSERVATIES\n\n${bronText}` : ''}
+
+Schrijf een diagnose. Begin altijd met de volgende vaste openingsparagraaf, letterlijk en ongewijzigd, vóór alles wat volgt uit de gesprekken en bronnen:
+
+---
+
+De centrale vraag van deze diagnose is eenvoudig: wat is de opdracht van B&S, wat wordt er van de afdeling verwacht, wat ligt er nu — en weten de medewerkers wat hun opdracht is. Het antwoord op de eerste vraag staat in het landelijk kader vanuit OM2020: drie pijlers — versterken van de omgevingsoriëntatie, sturen op integrale interventies, maatschappelijke legitimiteit en publiek vertrouwen — aangevuld met een expliciete opdracht om de processen verwerving in te richten in 2026-2027. De hoofdofficier voegt daaraan toe dat B&S meer strategisch moet zijn dan beleidsmatig — dichter bij de parketleiding, meedenkend en richtinggevend. Het antwoord op de tweede en derde vraag is wat deze diagnose blootlegt: dat kader is in Den Haag niet vertaald naar concrete verwachtingen, rollen en werkwijzen. De medewerkers kennen het niet. Het is in ieder geval niet geïmplementeerd — of de vertaling van kader naar concrete verwachtingen, rollen en werkwijzen is ergens onderweg verloren gegaan. Dat is de kern van het probleem. Niet dat mensen niet werken. Niet dat de structuur verkeerd is. Maar dat de opdracht ontbreekt.
+
+---
+
+Daarna volgt de diagnose op basis van de gesprekken en bronnen. Niet een opsomming van wat mensen zeggen — maar een redenering over wat er structureel mis is en waarom.
+
+Volg het analytisch kader uit de systeeminstructie. Dat betekent:
+- Begin met de conceptuele vraag: waarvoor bestaat B&S?
+- Geef de sturingsverantwoordelijkheid van de parketleiding een prominente positie
+- Behandel de hypothese over leidend/dienend als hypothese, niet als feit
+- Meet effect, niet inspanning
+
+**Wat structureel niet klopt**
+Benoem 3-5 fundamentele disfuncties met oorzaken. Wat ontbreekt, wat klopt niet in de inrichting, wat werkt structureel tegen — inclusief de rol van de parketleiding daarin?
+
+**De paradoxen**
+Benoem 2-3 spanningen die de kern van het probleem raken.
+
+**Wat dit zegt over de afdeling als geheel**
+Dominante patroon, cultuur, hoe de afdeling zichzelf positioneert.
+
+**Kern van de opgave**
+4-6 zinnen. Wat is de werkelijke diagnose?
+
+**Toetsvragen voor fase 1**
+Wat moet nog beantwoord worden voor het DECIDE-moment? Formuleer als open vragen, niet als acties.
+
+Geen actiepunten. Geen "ga met X in gesprek". Dit is een diagnose.`;
+      };
+
+      const generate = async () => {
+        if (!apiKey) { setErr('Geen API-sleutel — voeg die toe via de instellingen.'); return; }
+        if (gesprekken.length === 0 && bronnen.filter(b => b.tekst?.trim()).length === 0) {
+          setErr('Voeg eerst gesprekken of bronnen toe.'); return;
+        }
+        setLoading(true); setErr('');
+        try {
+          const prompt = buildPrompt();
+          const msgs = [{ role:'user', content: prompt }];
+          const result = await claude(msgs, SYS, apiKey);
+          saveDiagnose(result);
+          setHistory([...msgs, { role:'assistant', content: result }]);
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      const [chatHistory, setChatHistory] = useState([]);
+      const [chatLoading, setChatLoading] = useState(false);
+
+      const chat = async () => {
+        if (!input.trim() || !diagnose || !apiKey) return;
+        setChatLoading(true);
+        const vraag = input;
+        const contextMsg = { role:'user', content: `De huidige diagnose is:\n\n${diagnose}\n\nVraag: ${vraag}` };
+        try {
+          const result = await claude([contextMsg], SYS, apiKey);
+          setChatHistory(prev => [...prev, { id: uid(), vraag, antwoord: result }]);
+          setInput('');
+        } catch(e) { setErr(e.message); }
+        setChatLoading(false);
+      };
+
+      const incorporeer = async (antwoord, itemId) => {
+        setLoading(true);
+        const prompt = `Dit is de huidige diagnose:\n\n${diagnose}\n\nDit is een aanvulling of correctie die verwerkt moet worden:\n\n${antwoord}\n\nPas de diagnose gericht aan op basis van deze aanvulling. Herschrijf alleen wat relevant verandert — behoud de rest zoals het is. Geen nieuwe structuur, geen nieuwe opzet.`;
+        try {
+          const result = await claude([{ role:'user', content: prompt }], SYS, apiKey);
+          saveDiagnose(result);
+          setChatHistory(prev => prev.filter(item => item.id !== itemId));
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      const wis = () => {
+        if (window.confirm('Diagnose wissen? De bronnen blijven bewaard.')) {
+          saveDiagnose(''); setHistory([]); setChatHistory([]);
+        }
+      };
+
+      const totalBronChars = bronnen.reduce((n, b) => n + (b.tekst?.length || 0), 0);
+
+      return (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:20 }}>
+            <div>
+              <div style={S.secTitle}>Diagnose</div>
+              <div style={{ fontSize:13, color:C.mid }}>
+                {gesprekken.length} gesprekken · {bronnen.length} bronnen · {totalBronChars > 0 ? `${totalBronChars} tekens` : 'geen extra tekst'}
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              {diagnose && <button style={{ ...S.btnS, color:C.red, borderColor:C.red }} onClick={wis}>Wis diagnose</button>}
+              <button style={S.btnP} onClick={generate} disabled={loading}>
+                {loading ? <><Spinner /> Bezig…</> : diagnose ? '↻ Opnieuw' : '🔍 Maak diagnose'}
+              </button>
+            </div>
+          </div>
+
+          {err && <div style={{ background:'#fff0f0', border:'1px solid #f5c2c2', borderRadius:8, padding:'10px 14px', fontSize:13, color:C.red, marginBottom:16 }}>{err}</div>}
+
+          {/* Bronnen sectie */}
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, marginBottom:20, overflow:'hidden' }}>
+            <div style={{ background:C.navyDk, padding:'12px 18px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.white }}>Bronnen</span>
+              <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)' }}>naast de gesprekken</span>
+            </div>
+            <div style={{ padding:'16px 18px' }}>
+              {bronnen.length === 0 && (
+                <div style={{ fontSize:13, color:C.light, marginBottom:14, fontStyle:'italic' }}>
+                  Nog geen bronnen — de diagnose gebruikt alleen de gesprekken. Voeg extra context toe om de diagnose te verrijken.
+                </div>
+              )}
+              {bronnen.map(b => (
+                <div key={b.id} style={{ border:`1px solid ${editingId===b.id ? C.navy : C.border}`, borderRadius:8, padding:14, marginBottom:10, boxShadow: editingId===b.id ? `0 0 0 3px rgba(26,48,87,0.1)` : 'none' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                    <input style={{ ...S.inp, fontWeight:600, fontSize:13, color:C.navy, border:'none', padding:0, background:'transparent', flex:1 }}
+                      value={b.label} onChange={e => updateBron(b.id,'label',e.target.value)} onFocus={() => setEditingId(b.id)} />
+                    <button onClick={() => removeBron(b.id)} style={{ background:'none', border:'none', cursor:'pointer', color:C.light, fontSize:18, padding:'0 4px', lineHeight:1 }}>×</button>
+                  </div>
+                  <textarea style={{ ...S.ta, minHeight:100 }} placeholder="Plak of typ hier de tekst…"
+                    value={b.tekst||''} onChange={e => updateBron(b.id,'tekst',e.target.value)} onFocus={() => setEditingId(b.id)} />
+                  {b.tekst && <div style={{ fontSize:11, color:C.light, marginTop:3, textAlign:'right' }}>{b.tekst.length} tekens</div>}
+                </div>
+              ))}
+              <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:4 }}>
+                {BRON_SUGGESTIONS.map(s => (
+                  <button key={s} onClick={() => addBron(s)}
+                    style={{ padding:'6px 12px', borderRadius:20, border:`1.5px solid ${C.navyLt}`, background:C.white, color:C.navyLt, fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                    + {s}
+                  </button>
+                ))}
+                <button onClick={() => addBron('Eigen label')}
+                  style={{ padding:'6px 12px', borderRadius:20, border:`1.5px solid ${C.border}`, background:C.white, color:C.mid, fontSize:11, cursor:'pointer' }}>
+                  + Eigen label
+                </button>
+                <button onClick={() => pdfRef.current.click()}
+                  style={{ padding:'6px 12px', borderRadius:20, border:`1.5px solid ${C.orange}`, background:C.white, color:C.orange, fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                  📄 Upload PDF
+                </button>
+                <input ref={pdfRef} type="file" accept="application/pdf" style={{ display:'none' }} onChange={uploadPdf} />
+              </div>
+            </div>
+          </div>
+
+          {/* Diagnose resultaat */}
+          {!diagnose && !loading && (
+            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:40, textAlign:'center', color:C.mid }}>
+              <div style={{ fontSize:36, marginBottom:12 }}>🔍</div>
+              <div style={{ fontSize:14, fontWeight:600, marginBottom:6 }}>Nog geen diagnose</div>
+              <div style={{ fontSize:13 }}>Voeg bronnen toe (optioneel) en klik op "Maak diagnose".<br/>Claude combineert de gesprekken en bronnen tot een diagnose.</div>
+            </div>
+          )}
+
+          {loading && <div style={{ textAlign:'center', padding:40, color:C.mid, fontSize:14 }}>Diagnose wordt gemaakt…</div>}
+
+          {diagnose && !loading && (
+            <div className="fade-in">
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, overflow:'hidden', marginBottom:16 }}>
+                <div style={{ background:C.navy, padding:'12px 18px' }}>
+                  <span style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.white }}>Diagnose</span>
+                </div>
+                <div style={{ ...S.aiBox, borderRadius:0, border:'none' }}>{diagnose}</div>
+              </div>
+
+
+              {/* Chat */}
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:18, marginBottom:16 }}>
+                <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.navy, marginBottom:12 }}>Stel een vraag over de diagnose</div>
+
+                {chatHistory.length > 0 && (
+                  <div style={{ marginBottom:14, display:'flex', flexDirection:'column', gap:12 }}>
+                    {chatHistory.map((item, i) => (
+                      <div key={i}>
+                        <div style={{ fontSize:12, fontWeight:600, color:C.navy, background:C.creamDk, padding:'7px 12px', borderRadius:'8px 8px 0 0' }}>
+                          ↗ {item.vraag}
+                        </div>
+                        <div style={{ fontSize:13, color:C.text, background:'#F8F7F3', padding:'10px 12px', borderRadius:'0 0 8px 8px', lineHeight:1.65, whiteSpace:'pre-wrap', borderLeft:`3px solid ${C.navyLt}` }}>
+                          {item.antwoord}
+                        </div>
+                        <div style={{ display:'flex', gap:8, marginTop:6 }}>
+                          <button onClick={() => incorporeer(item.antwoord, item.id)} disabled={loading}
+                            style={{ ...S.btnS, fontSize:11, padding:'5px 12px', color:C.green, borderColor:C.green }}>
+                            {loading ? <Spinner /> : '↳ Verwerk in diagnose'}
+                          </button>
+                          <button onClick={() => setChatHistory(prev => prev.filter(c => c.id !== item.id))}
+                            style={{ background:'none', border:'none', cursor:'pointer', fontSize:11, color:C.light }}>
+                            verwijder
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ display:'flex', gap:8 }}>
+                  <input style={{ ...S.inp, flex:1 }}
+                    placeholder="Bijv: 'Wat zegt dit over I&O?' of 'Ontbreekt er iets in de analyse?'"
+                    value={input} onChange={e => setInput(e.target.value)}
+                    onKeyDown={e => e.key==='Enter' && !e.shiftKey && chat()} />
+                  <button style={S.btnP} onClick={chat} disabled={chatLoading || !input.trim()}>
+                    {chatLoading ? <Spinner /> : 'Vraag'}
+                  </button>
+                </div>
+                <div style={{ fontSize:11, color:C.light, marginTop:6 }}>Antwoord verschijnt hier — de diagnose blijft ongewijzigd totdat je kiest voor "Verwerk in diagnose".</div>
+              </div>
+
+              <div style={{ display:'flex', gap:8 }}>
+                <button style={S.btnS} onClick={() => navigator.clipboard?.writeText(diagnose)}>📋 Kopieer</button>
+                <button style={{ ...S.btnS, color:C.light, borderColor:C.border }} onClick={wis}>Wis diagnose</button>
+              </div>
+
+              {/* ── Notitie op basis van diagnose ── */}
+              <DiagnoseNotitie diagnose={diagnose} apiKey={apiKey} />
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function DiagnoseNotitie({ diagnose, apiKey }) {
+      const [notitie, setNotitie] = useState(() => {
+        try { return localStorage.getItem('om-diagnose-notitie') || ''; } catch { return ''; }
+      });
+      const [history, setHistory] = useState([]);
+      const [input, setInput] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [err, setErr] = useState('');
+      const [open, setOpen] = useState(false);
+
+      const saveNotitie = (n) => {
+        setNotitie(n);
+        try { localStorage.setItem('om-diagnose-notitie', n); } catch {}
+      };
+
+      const SYS_NOTITIE = `Je schrijft een bevindingsnotitie voor een nieuw afdelingshoofd bij OM Parket Den Haag. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal, geen overbodige opsmuk. Maximaal 1 A4.
+
+De notitie volgt altijd deze volgorde: eerst het conceptuele (waarvoor bestaat B&S), dan pas het structurele (of de inrichting klopt). Niet andersom.
+
+De sturingsverantwoordelijkheid van de parketleiding krijgt een prominente positie — dit is geen puur intern probleem van B&S. Het parket heeft nagelaten te sturen op samenhang en aansluiting. Dat is onderdeel van de bevinding.
+
+De notitie onderscheidt expliciet waar B&S leidend moet zijn (verwerving, woordvoering, informatiesturing) en waar dienend (klachtafhandeling, bestuursondersteuning, advies op verzoek). Zolang dat onderscheid niet gemaakt is, blijft de afdeling standaard reactief.
+
+De notitie sluit af met de vraag wat nog getoetst moet worden voor het DECIDE-moment met de hoofdofficier — niet als actielijst maar als open vragen die fase 1 moet beantwoorden.
+
+Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
+
+      const generate = async () => {
+        if (!apiKey) { setErr('Geen API-sleutel.'); return; }
+        setLoading(true); setErr(''); setOpen(true);
+        try {
+          const msgs = [{ role:'user', content:`Schrijf een scherpe, compacte notitie op basis van deze diagnose:\n\n${diagnose}\n\nDe notitie is een sturingsinstrument voor het afdelingshoofd zelf en als basis voor het DECIDE-gesprek met de hoofdofficier aan het einde van fase 1. Het is geen actieplan en geen stappenplan.\n\nStructuur:\n\n**De kern** (3-4 zinnen — wat is de essentie van de problematiek, direct geformuleerd)\n\n**Wat structureel anders moet** (4-6 punten — niet hoe, maar wat de gewenste toestand is per gebied)\n\n**Wat dit vraagt van de afdeling** (wat moet er anders in hoe de afdeling als geheel functioneert — cultuur, houding, werkwijze)\n\n**Wat dit van mij vraagt als afdelingshoofd** (wat is mijn rol, waar moet ik op sturen, wat vraagt dit van mijn leiderschap)\n\n**Wat ik daarvoor nodig heb** (van het parket, van de parketleiding, van andere afdelingen en leidinggevenden — wat is noodzakelijk om dit te kunnen realiseren)\n\n**Scenario-advies** (op basis van de diagnose: past scenario A, B of C het beste, en waarom — dit is input voor het gesprek met de hoofdofficier, geen opdracht aan hem)\n\nMaximaal 1,5 A4. Analytisch, direct, geen ambtelijke taal. Geen actielijsten.` }];
+          const result = await claude(msgs, SYS_NOTITIE, apiKey);
+          saveNotitie(result);
+          setHistory([...msgs, { role:'assistant', content:result }]);
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      const refine = async () => {
+        if (!input.trim() || !notitie || !apiKey) return;
+        setLoading(true);
+        const newH = [...history, { role:'user', content:input }];
+        try {
+          const result = await claude(newH, SYS_NOTITIE, apiKey);
+          saveNotitie(result);
+          setHistory([...newH, { role:'assistant', content:result }]);
+          setInput('');
+        } catch(e) { setErr(e.message); }
+        setLoading(false);
+      };
+
+      return (
+        <div style={{ marginTop:24 }}>
+          <div style={{ background:C.navyDk, borderRadius:10, overflow:'hidden' }}>
+            <div style={{ padding:'14px 18px', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer' }}
+              onClick={() => setOpen(o => !o)}>
+              <span style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.white }}>
+                Notitie op basis van diagnose
+              </span>
+              <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                {notitie && <span style={{ fontSize:10, color:'rgba(255,255,255,0.5)' }}>opgeslagen</span>}
+                <button style={{ ...S.btnP, padding:'6px 14px', fontSize:12 }}
+                  onClick={e => { e.stopPropagation(); generate(); }} disabled={loading}>
+                  {loading ? <Spinner /> : notitie ? '↻ Opnieuw' : 'Maak notitie'}
+                </button>
+                <span style={{ color:'rgba(255,255,255,0.5)', fontSize:16 }}>{open ? '−' : '+'}</span>
+              </div>
+            </div>
+
+            {open && (
+              <div style={{ padding:'0 18px 18px' }} className="fade-in">
+                {err && <div style={{ fontSize:13, color:'#f5a0a0', marginBottom:10 }}>{err}</div>}
+
+                {!notitie && !loading && (
+                  <div style={{ fontSize:13, color:'rgba(255,255,255,0.4)', fontStyle:'italic', padding:'10px 0' }}>
+                    Klik op "Maak notitie" — Claude vertaalt de diagnose naar een compacte actienotitie.
+                  </div>
+                )}
+                {loading && <div style={{ fontSize:13, color:'rgba(255,255,255,0.5)', padding:'10px 0' }}>Notitie wordt geschreven…</div>}
+
+                {notitie && !loading && (
+                  <>
+                    <div style={{ ...S.aiBox, background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', color:C.white, marginBottom:14 }}>{notitie}</div>
+
+                    <div style={{ display:'flex', gap:8, marginBottom:12 }}>
+                      <input style={{ ...S.inp, flex:1, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:C.white }}
+                        placeholder="Bijv: 'Maak de eerste acties concreter' of 'Kort in tot een halve A4'"
+                        value={input} onChange={e => setInput(e.target.value)}
+                        onKeyDown={e => e.key==='Enter' && !e.shiftKey && refine()} />
+                      <button style={S.btnP} onClick={refine} disabled={loading || !input.trim()}>
+                        {loading ? <Spinner /> : 'Stuur'}
+                      </button>
+                    </div>
+                    {history.filter(m => m.role==='user').slice(1).map((m,i) => (
+                      <div key={i} style={{ fontSize:11, color:'rgba(255,255,255,0.4)', padding:'4px 8px', background:'rgba(255,255,255,0.05)', borderRadius:5, marginBottom:4 }}>↳ {m.content}</div>
+                    ))}
+
+                    <div style={{ display:'flex', gap:8, marginTop:8 }}>
+                      <button style={{ ...S.btnS, borderColor:'rgba(255,255,255,0.3)', color:'rgba(255,255,255,0.7)' }}
+                        onClick={() => navigator.clipboard?.writeText(notitie)}>📋 Kopieer</button>
+                      <button style={{ ...S.btnS, borderColor:'rgba(255,255,255,0.15)', color:'rgba(255,255,255,0.4)' }}
+                        onClick={() => { saveNotitie(''); setHistory([]); }}>Wis notitie</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── OVERLEGGEN ───────────────────────────────────────────────────────────
+    const PRIO_COLORS = { Hoog: C.red, Medium: C.orange, Laag: C.green, 'Geen prio': C.light, Nvt: C.light };
+    const TYPE_COLORS = { Intern: C.navy, Extern: C.gold, Beide: C.green };
+    const TOETS_COLORS = { Ja: C.green, Deels: C.orange, Nee: C.red };
+
+    const START_OVERLEGGEN = [
+      // NETWERK
+      { naam:'Gemeente Den Haag', domein:'Netwerk', type:'Extern', frequentie:'Ad hoc', prioriteit:'Hoog', eigenaar:'Lieke Post', relaties:[], doel:'Herke Elbers is directeur OOV. Direct aanspreekpunt voor hoofd B&S. Lieke is ook belangrijk contact voor Herke t.a.v. strategische voorbereiding Haagse Driehoek.', deelnemers:'Herke Elbers', standVanZaken:'Overdracht geweest. Primair contactpunt wordt Lieke.', actiesNodig:'Primair contactpunt overdragen aan Lieke', toelichting:'', toets:{} },
+      { naam:'Eenheidsleiding Politie Den Haag', domein:'Netwerk', type:'Extern', frequentie:'Ad hoc', prioriteit:'Hoog', eigenaar:'Lieke Post / Frank van Dijk', relaties:[], doel:'Contact op dossiers en bij impactvolle gebeurtenissen met bestuurlijke gevoeligheid.', deelnemers:'Dennis den Os / Anja de Bruin', standVanZaken:'Kennismaking geweest. Lieke meer koppelen aan Dennis. Anja meer exclusief aan Frank.', actiesNodig:'Lieke meer koppelen aan Dennis den Os', toelichting:'', toets:{} },
+      { naam:'RIEC Den Haag', domein:'Netwerk', type:'Extern', frequentie:'Maandelijks', prioriteit:'Laag', eigenaar:'Marianne van Oosten', relaties:[], doel:'Periodiek overleg. Scherp blijven dat RIEC onze positie goed weergeeft. Hoofd B&S is escalatieniveau.', deelnemers:'Ilona Kalksma, Marianne van Oosten', standVanZaken:'Bila 17/3: RIEC onderhoudt nog directe lijnen bij politie. Aangegeven dat RIEC niet bij politie maar bij OM moet zijn.', actiesNodig:'Overwegen beslissingen integrale aanpak bij stuurploeg (GBO) te beleggen. Primair contactpunt is Marianne.', toelichting:'', toets:{} },
+      { naam:'PaG', domein:'Netwerk', type:'Extern', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'Aranka van Driel', relaties:[], doel:'Emese Simon als contact- en informatiepunt vanuit hoofden B&S. Remco Hendriks fijn informatiepunt t.a.v. OMKP, LOVP en Collegeoverleggen.', deelnemers:'Emese Simon / Remco Hendriks', standVanZaken:'Thijs toegevoegd aan maillijst hoofden B&S.', actiesNodig:'Geen', toelichting:'', toets:{} },
+      // TEAM & HR
+      { naam:'Gebiedsoverleg', domein:'Team & HR', type:'Intern', frequentie:'Wekelijks', prioriteit:'Hoog', eigenaar:'Tineke Geertsema', relaties:['RAO','IDO'], doel:'Borgen dat gesprek over de juiste dingen gaat (voldoende strategisch). Omgang en verhoudingen in cluster monitoren. Strategische onderwerpen: toekomstbestendige basisteams, 1-opsporing, doorontwikkeling driehoeken.', deelnemers:'Gebiedscluster', standVanZaken:'Eind maart vervolgbespreking TBBT. 1-opsporing verbonden aan RAO. Doorontwikkeling driehoeken nog concreet te maken.', actiesNodig:'Hilde sluit in april een keer aan', toelichting:'', toets:{} },
+      { naam:'Afdelingsoverleg', domein:'Team & HR', type:'Intern', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Aranka van Driel', relaties:[], doel:'Om en om regulier en thematisch. Rooster voor 2026 gemaakt met per kwartaal bepaling van thema\'s.', deelnemers:'Hele afdeling', standVanZaken:'Aanwezigheid niet altijd even hoog, maar vaste kern is er steeds.', actiesNodig:'Aranka heeft planning', toelichting:'', toets:{} },
+      { naam:'Beleidsoverleg', domein:'Team & HR', type:'Intern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Hilde Stuart / Marlot van der Kolk', relaties:[], doel:'Voorgezeten door coördinerend adviseurs of bestuurssecretaris. Vaste agenda. Volgende overleg in het teken van het overleg zelf: wat willen we er mee?', deelnemers:'Beleidscluster', standVanZaken:'Werkt met vaste agenda.', actiesNodig:'Vanuit teamleiding helpen de juiste onderwerpen te bespreken', toelichting:'', toets:{} },
+      { naam:'P-cyclus', domein:'Team & HR', type:'Intern', frequentie:'Ad hoc', prioriteit:'Hoog', eigenaar:'Thijs Berger', relaties:[], doel:'Vlootschouw en overdracht van specifieke dossiers.', deelnemers:'', standVanZaken:'Vindt apart plaats.', actiesNodig:'Geen', toelichting:'', toets:{} },
+      { naam:'Detacheringen', domein:'Team & HR', type:'Intern', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'Thijs Berger', relaties:[], doel:'Detachering Elisah Kok — voeren voortgangs- en ontwikkelgesprekken. Inhoudelijke sturing door Frank (als lid regiegroep).', deelnemers:'Elisah Kok / Frank van Dijk', standVanZaken:'Lopend.', actiesNodig:'P-zorg en functionele aansturing blijven scheiden', toelichting:'', toets:{} },
+      // OVERLEG
+      { naam:'RAO', domein:'Overleg', type:'Beide', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Thijs Berger', relaties:['Directieoverleg','Cijferoverleg','IDO'], doel:'Co-voorzitterschap met Anil Soerdjbalie (politie). Ondersteuning door Hanneke Franssen en Arthur Haijer. Voorafgaand afstemoverleg voorzitters.', deelnemers:'Hanneke Franssen, Arthur Haijer, Anil Soerdjbalie', standVanZaken:'Politie voelt eigenaarschap. Korte lijnen en afstemmen door voorzitters vasthouden.', actiesNodig:'Planning RAO en Cijferoverleg afgestemd op DO. Checken of Karin cijferoverleg heeft opgenomen.', toelichting:'', toets:{} },
+      { naam:'Cijferoverleg', domein:'Overleg', type:'Beide', frequentie:'Kwartaal', prioriteit:'Geen prio', eigenaar:'Hanneke Franssen / Arthur Haijer', relaties:['RAO'], doel:'Kwartaaloverleg met deelnemers RAO aangevuld met controllers politie en OM. Instroom-doorstroom-uitstroom bespreken.', deelnemers:'Hanneke Franssen, Arthur Haijer, Jan Keijzer, Gerard Valkering, Remco de Geest, Adrienne Bos-van Hasselt, Yara Hoppenbrouwers', standVanZaken:'Planning gemaakt. Vooroverleggen met control (Jan) nog te plannen.', actiesNodig:'Vooroverleggen met Jan Keijzer plannen', toelichting:'', toets:{} },
+      { naam:'Begeleidingscommissie Regionaal Beleidsplan', domein:'Overleg', type:'Extern', frequentie:'Maandelijks', prioriteit:'Medium', eigenaar:'Hilde Stuart', relaties:['RBO'], doel:'Meerjarig regionaal beleidsplan 2027-2030 in voorbereiding. BC ziet toe op proces en geeft richting. In Q4 2026 vast te stellen in RBO.', deelnemers:'Hilde Stuart, gebiedsadviseur', standVanZaken:'Komende weken eerste concept. Relevant voor planning en prioriteiten.', actiesNodig:'Verankering binnen parket. Hilde kan proces bijlopen.', toelichting:'', toets:{} },
+      { naam:'Driehoek Den Haag', domein:'Overleg', type:'Extern', frequentie:'Wekelijks', prioriteit:'Hoog', eigenaar:'Marcel de Boer', relaties:['Strategisch vooroverleg driehoek'], doel:'4 geplande driehoeken per maand. Marcel doet er 2, Hanneke 1, opvolger Rick 1. Extra driehoeken ad hoc.', deelnemers:'Marcel de Boer, Hanneke Franssen, Nine (waarnemer)', standVanZaken:'Afspraken gemaakt met ondersteuners. Marcel heeft wekelijks fysiek contactmoment met Margreet.', actiesNodig:'Afspraken op papier zetten. Roostering, wekelijks afstemmoment Margreet, ambtelijk vooroverleg.', toelichting:'', toets:{} },
+      { naam:'Strategisch vooroverleg driehoek', domein:'Overleg', type:'Intern', frequentie:'Maandelijks', prioriteit:'Medium', eigenaar:'Lieke Post / Marcel de Boer', relaties:['Driehoek Den Haag'], doel:'Meer strategisch/bestuurlijk inhoudelijk gesprek op de driehoek. Interne bespreking binnen B&S met afdelingshoofd moet geborgd blijven.', deelnemers:'Lieke Post, Marcel de Boer, afdelingshoofd', standVanZaken:'Loopt.', actiesNodig:'Borging interne bespreking', toelichting:'', toets:{} },
+      { naam:'Directieoverleg', domein:'Overleg', type:'Beide', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Voorzitters RAO', relaties:['RAO'], doel:'Agenderen bespreekpunten vanuit RAO, focus op bestuurlijke besluiten.', deelnemers:'Voorzitters RAO', standVanZaken:'Terugkerend.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'OMT AP Den Haag', domein:'Overleg', type:'Intern', frequentie:'Maandelijks', prioriteit:'Medium', eigenaar:'Thijs Berger / Aranka van Driel', relaties:['RAO'], doel:'Nu MARAP weer maandelijks wordt gedeeld, blijven instroomontwikkelingen in zicht MT. Overwegen 2x per jaar verdiepend over instroom te praten.', deelnemers:'MT AP Den Haag', standVanZaken:'Loopt.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Actualiteitenoverleg', domein:'Overleg', type:'Intern', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'Thijs Berger', relaties:[], doel:'Doorspreken gevoelige zaken met Hoofdofficier, Plv en rechercheofficieren.', deelnemers:'HovJ, PlvHovJ, rechercheofficieren', standVanZaken:'Al een aantal weken niet nodig geweest.', actiesNodig:'Vervanging wenselijk', toelichting:'', toets:{} },
+      { naam:'RBO', domein:'Overleg', type:'Extern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Hilde Stuart', relaties:['Begeleidingscommissie Regionaal Beleidsplan'], doel:'Goed inrichten van proces voorbereiding RBO (inclusief rollen en verantwoordelijkheden) is onderdeel van beleidsadvisering op hoger plan brengen. Hilde heeft voorstel geschreven.', deelnemers:'Hilde Stuart', standVanZaken:'Hilde heeft voorstel geschreven.', actiesNodig:'Proces inregelen (sturing leidinggevende nodig)', toelichting:'', toets:{} },
+      { naam:'Regionale Cyberdriehoek', domein:'Overleg', type:'Extern', frequentie:'Maandelijks', prioriteit:'Medium', eigenaar:'Karlijn Scheepers', relaties:[], doel:'Cybercrime en GC als thema van regionaal beleidsplan. Bestuurlijk portefeuillehouder, hoofd B&S en plv. eenheidschef Anja de Bruin.', deelnemers:'BM Voorschoten, hoofd B&S, Anja de Bruin, Karlijn Scheepers', standVanZaken:'Planning gemaakt.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Afstemmoment GBOs-HOvJ-ROvJs', domein:'Overleg', type:'Intern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Gebiedscluster', relaties:[], doel:'Periodiek overleg tussen gebiedsofficieren, hoofdofficier, hoofd B&S en rechercheofficier. Eenheid in handelen houden, relevante ontwikkelingen signaleren, strategisch afstemmen.', deelnemers:'Gebiedsofficieren, HovJ, hoofd B&S, rechercheofficier', standVanZaken:'Planning gemaakt.', actiesNodig:'Definitief adviseur aanwijzen als eigenaar', toelichting:'', toets:{} },
+      { naam:'OMKP', domein:'Overleg', type:'Extern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Hilde Stuart / rechercheofficieren / informatieofficier', relaties:[], doel:'Vakinhoudelijke ontwikkelingen. Deelnemer tot 1 april, daarna ander hoofd B&S (Helen Brok). Voorbereiden annotatie tbv Margreet.', deelnemers:'Hilde Stuart, rechercheofficieren', standVanZaken:'Planning bekend. Proces van voorbereiden nog strak te trekken.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Sierteelttafel', domein:'Overleg', type:'Extern', frequentie:'Maandelijks', prioriteit:'Laag', eigenaar:'Marianne van Oosten / Quinnie', relaties:[], doel:'Uitvoeringsagenda 2026 vastgesteld. Ambitie OM anders dan politie (minder operationeel). Meer investeren in kennisdeling op basis van CCV-barrieremodellen.', deelnemers:'Marianne van Oosten, Quinnie', standVanZaken:'Vervanger aan te wijzen.', actiesNodig:'Vervanger aanwijzen', toelichting:'', toets:{} },
+      { naam:'Landelijk overleg hoofden B&S', domein:'Overleg', type:'Extern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Thijs Berger', relaties:[], doel:'Tot 1 april voorzitter, daarna APDH als deelnemer. Terugkerende onderwerpen: financiële ontwikkelingen, opportuniteit, instroom (verwerving).', deelnemers:'Hoofden B&S landelijk', standVanZaken:'Ambitie: in Q2 pilot verwerving starten. Hanneke schrijft voorstel.', actiesNodig:'Voorstel pilot opportuniteit schrijven en intern bespreken', toelichting:'', toets:{} },
+      { naam:'Operationele weekstart', domein:'Overleg', type:'Intern', frequentie:'Wekelijks', prioriteit:'Geen prio', eigenaar:'Aranka van Driel', relaties:[], doel:'Weekstart met alle teamleiders.', deelnemers:'Teamleiders', standVanZaken:'Aranka neemt al deel.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'IDO', domein:'Overleg', type:'Intern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Yara Hoppenbrouwers', relaties:['RAO'], doel:'Interne afstemming gebiedsmensen en districtsmensen. Focus op doorontwikkeling sturingsoverleggen met politie. Evaluatie uitgevoerd — grote verschillen in basisteams.', deelnemers:'Yara Hoppenbrouwers, Djouni van Ravenhorst, districtsmensen', standVanZaken:'Evaluatie besproken in RAO. Bijeenkomst plannen om districtsmensen op zelfde spoor te krijgen. Nog niet gepland.', actiesNodig:'Bijeenkomst plannen om te hercontracteren op opdracht. Goede moment: vertrek Sharon / start vervanger.', toelichting:'', toets:{} },
+      { naam:'Wekelijkse bila met hoofdofficier', domein:'Overleg', type:'Intern', frequentie:'Wekelijks', prioriteit:'Medium', eigenaar:'Thijs Berger', relaties:[], doel:'Wekelijks afstemmoment met Margreet.', deelnemers:'Hoofdofficier', standVanZaken:'Loopt.', actiesNodig:'Vervanging wenselijk', toelichting:'', toets:{} },
+      { naam:'Afstemgroep AI', domein:'Overleg', type:'Intern', frequentie:'Ad hoc', prioriteit:'Nvt', eigenaar:'Nvt', relaties:[], doel:'Afstemming t.b.v. verkenning AI door Mariette Bode. Voor vervolgtraject wordt ander hoofd B&S aangezocht.', deelnemers:'Mariette Bode', standVanZaken:'Vervanging door ander hoofd B&S.', actiesNodig:'Vervanger aanwijzen', toelichting:'', toets:{} },
+      { naam:'Bilateraal overleg MT-niveau', domein:'Overleg', type:'Beide', frequentie:'Maandelijks', prioriteit:'Medium', eigenaar:'MT-leden', relaties:['RAO','Directieoverleg'], doel:'Op thema\'s van VA en BKB periodiek overleg tussen portefeuillehoudend MT-leden van OM en politie. MT-besluit genomen. Memo met achtergrond en onderwerpen geschreven.', deelnemers:'MT-leden OM en politie', standVanZaken:'Eerste overleggen ingepland. Doorplannen verantwoordelijkheid MT-leden zelf.', actiesNodig:'', toelichting:'', toets:{} },
+      // INHOUDELIJK DOSSIER
+      { naam:'PvA Instroom', domein:'Inhoudelijk dossier', type:'Intern', frequentie:'Kwartaal', prioriteit:'Hoog', eigenaar:'Hanneke Franssen / Arthur Haijer', relaties:['RAO','Directieoverleg'], doel:'Integraal plan van aanpak instroom. Laatste update december 2025. Volgende update 1 april 2026. Bespreking in Directieoverleg en Ruitgesprek in juni.', deelnemers:'Hanneke Franssen, Arthur Haijer, Frank van Dijk', standVanZaken:'In concept voorbesproken met Frank. Hanneke bezig met update.', actiesNodig:'Update realiseren voor bespreking DO en Ruitgesprek juni', toelichting:'', toets:{} },
+      { naam:'Opportuniteit / pilot verwerving', domein:'Inhoudelijk dossier', type:'Intern', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'Hanneke Franssen / Thijs Berger', relaties:['RAO'], doel:'Pilot verwervingsproces doorlopen in 1 gemeente (Leiden of LeiVo). Intell tot driehoek. Hanneke kent het landelijk vastgestelde modelproces.', deelnemers:'Hanneke Franssen, Marianne van Oosten, Quinnie, Anil Soerdjbalie', standVanZaken:'Besproken met Anil (geen voorkeur gemeente). Marianne/Quinnie aangehaakt.', actiesNodig:'Bespreken in RAO, daarna voorstel op papier en intern bespreken met Margreet.', toelichting:'', toets:{} },
+      { naam:'Toekomstbestendige basisteams', domein:'Inhoudelijk dossier', type:'Intern', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'Thijs Berger / Jan Keijzer', relaties:[], doel:'Control maakt impactanalyse, bespreking MT 21 april. Vervolg monitoren.', deelnemers:'Jan Keijzer', standVanZaken:'Impactanalyse in voorbereiding.', actiesNodig:'Op MT 21 april. Strak vasthouden richting Jan Keijzer.', toelichting:'', toets:{} },
+      { naam:'Doorontwikkeling integrale advisering', domein:'Inhoudelijk dossier', type:'Intern', frequentie:'Maandelijks', prioriteit:'Medium', eigenaar:'Aranka van Driel', relaties:[], doel:'Doorontwikkeling integrale bestuurlijke/beleidsadvisering. Stappen op proces, ontwikkeling medewerkers, organisatie en sturing. Periodiek besproken met Frank.', deelnemers:'Frank van Dijk, Aranka van Driel', standVanZaken:'Concrete stappen: op orde krijgen processen driehoek DH, RBO, OMKP en PMO.', actiesNodig:'Vervolgstappen bepalen met Frank', toelichting:'', toets:{} },
+      { naam:'Verzakelijking B&S', domein:'Inhoudelijk dossier', type:'Intern', frequentie:'Ad hoc', prioriteit:'Laag', eigenaar:'Aranka van Driel / nieuw afdelingshoofd', relaties:[], doel:'Overzicht externe overleggen op H-schijf. Volgende stap: in gesprek met clusters kijken of alle overleggen nog nodig zijn.', deelnemers:'Clusterleiders', standVanZaken:'Overzicht bestaat.', actiesNodig:'Bespreken met clusters', toelichting:'', toets:{} },
+      { naam:'Buikpijnzaken', domein:'Inhoudelijk dossier', type:'Intern', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'Thijs Berger', relaties:[], doel:'Zaken waarin interne tijdlijn wordt opgesteld. Evaluatie afgesproken met Margreet. Auke: geen expliciete leerpunten uit recente zaken.', deelnemers:'Auke, Margreet', standVanZaken:'Terugkoppeling aan afstemmingsoverleg nog te doen.', actiesNodig:'Terugkoppeling aan afstemmingsoverleg. Overwegen of besluit tot tijdlijn steeds terecht wordt genomen.', toelichting:'', toets:{} },
+    ].map(o => ({ ...o, id: Math.random().toString(36).slice(2,10) }));
+
+    const TOETS_VRAGEN = [
+      { id:'resultaat', label:'Levert dit overleg een concreet resultaat op?' },
+      { id:'eigenaar',  label:'Is er een eigenaar die zich er echt aan committeert?' },
+      { id:'gemist',    label:'Zou het parket iets missen als dit overleg wegvalt?' },
+    ];
+
+    function OverleggenView({ overleggen, onOverleggenChange, apiKey }) {
+      const [tab, setTab] = useState('inventaris');
+      const [netwerkTab, setNetwerkTab] = useState('graph');
+      const [editing, setEditing] = useState(null);
+      const [aiText, setAiText] = useState('');
+      const [aiLoading, setAiLoading] = useState(false);
+      const [aiErr, setAiErr] = useState('');
+      const namen = overleggen.map(o => o.naam);
+
+      const update = (id, field, val) => onOverleggenChange(overleggen.map(o => o.id === id ? { ...o, [field]: val } : o));
+      const updateToets = (id, vId, val) => onOverleggenChange(overleggen.map(o => o.id === id ? { ...o, toets: { ...o.toets, [vId]: val } } : o));
+      const addOverleg = () => {
+        const n = { id: uid(), naam:'Nieuw overleg', domein:'Overleg', type:'Intern', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'', relaties:[], doel:'', deelnemers:'', standVanZaken:'', actiesNodig:'', toelichting:'', toets:{} };
+        onOverleggenChange([...overleggen, n]);
+        setEditing(n.id);
+      };
+      const del = (id) => { if(window.confirm('Overleg verwijderen?')) onOverleggenChange(overleggen.filter(o => o.id !== id)); };
+
+      const toetsTotaal = (o) => {
+        const vals = Object.values(o.toets || {});
+        if (!vals.length) return null;
+        if (vals.every(v => v === 'Ja')) return 'Ja';
+        if (vals.some(v => v === 'Nee')) return 'Nee';
+        return 'Deels';
+      };
+
+      const analyzeAI = async () => {
+        if (!apiKey) { setAiErr('Geen API-sleutel.'); return; }
+        setAiLoading(true); setAiErr('');
+        const tekst = overleggen.map(o => {
+          const t = toetsTotaal(o);
+          return `${o.naam} | ${o.type} | ${o.frequentie} | Prio: ${o.prioriteit} | Eigenaar: ${o.eigenaar || '?'} | Relaties: ${o.relaties.join(', ')||'geen'} | Toetsing: ${t||'niet gedaan'}`;
+        }).join('\n');
+        try {
+          const result = await claude([{ role:'user', content:`Analyseer de overlegstructuur van afdeling B&S bij OM Parket Den Haag:\n\n${tekst}\n\nBeantwoord:\n1. Welke overleggen staan centraal — veel verbindingen, hoog risico als ze wegvallen?\n2. Welke overleggen zijn geïsoleerd — mogelijk overbodig?\n3. Waar lopen intern en extern door elkaar — rolvervaging?\n4. Welke overleggen bedienen hetzelfde doel maar zijn apart georganiseerd?\n5. Wat ontbreekt gezien de diagnosebevindingen over B&S?\n6. Welke overleggen hebben geen eigenaar of onduidelijk eigenaarschap?\n\nAnalytisch, direct, geen ambtelijke taal.` }],
+            `Je analyseert de overlegstructuur van afdeling B&S bij OM Parket Den Haag. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal. De afdeling heeft vijf clusters: beleidsondersteuning & advies, gebiedsgericht werken, intelligence & ondermijning, communicatie, en bureau juridische zaken.`,
+            apiKey);
+          setAiText(result);
+        } catch(e) { setAiErr(e.message); }
+        setAiLoading(false);
+      };
+
+      return (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:20 }}>
+            <div>
+              <div style={S.secTitle}>Overleggen</div>
+              <div style={{ fontSize:13, color:C.mid }}>{overleggen.length} overleggen</div>
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button style={S.btnS} onClick={() => {
+                const bestaandeNamen = overleggen.map(o => o.naam.toLowerCase().trim());
+                const toe = START_OVERLEGGEN.filter(s => !bestaandeNamen.includes(s.naam.toLowerCase().trim()));
+                if (toe.length === 0) { alert('Alle overleggen uit de overdracht staan er al in.'); return; }
+                if (window.confirm(`${toe.length} ontbrekende overleggen toevoegen uit de overdracht van Lodewijk?`)) {
+                  onOverleggenChange([...overleggen, ...toe.map(o => ({ ...o, id: uid() }))]);
+                }
+              }}>+ Laad uit overdracht</button>
+              <button style={S.btnP} onClick={addOverleg}>+ Nieuw overleg</button>
+            </div>
+          </div>
+
+          <div style={{ display:'flex', gap:8, marginBottom:20 }}>
+            {[['inventaris','📋 Inventarisatie'],['toetsing','✅ Toetsing'],['netwerk','🔗 Netwerk']].map(([id,lbl]) => (
+              <button key={id} onClick={() => setTab(id)}
+                style={{ ...S.btnS, background: tab===id ? C.navy : 'transparent', color: tab===id ? C.white : C.navy, fontSize:13 }}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          {/* ── INVENTARISATIE ── */}
+          {tab === 'inventaris' && (
+            <div className="fade-in">
+              {overleggen.map(o => (
+                <div key={o.id} style={{ background:C.white, border:`1px solid ${editing===o.id ? C.navy : C.border}`, borderRadius:10, padding:16, marginBottom:10, borderLeft:`3px solid ${TYPE_COLORS[o.type]||C.border}`, boxShadow: editing===o.id ? `0 0 0 3px rgba(26,48,87,0.1)` : '0 1px 4px rgba(0,0,0,0.04)' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom: editing===o.id ? 12 : 0 }}>
+                    <div style={{ flex:1, cursor:'pointer' }} onClick={() => setEditing(editing===o.id ? null : o.id)}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                        <span style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700 }}>{o.naam}</span>
+                        <span style={S.pill(TYPE_COLORS[o.type]||C.mid)}>{o.type}</span>
+                        <span style={S.pill(PRIO_COLORS[o.prioriteit]||C.mid)}>{o.prioriteit}</span>
+                        {toetsTotaal(o) && <span style={S.pill(TOETS_COLORS[toetsTotaal(o)]||C.mid)}>{toetsTotaal(o)}</span>}
+                      </div>
+                      <div style={{ fontSize:12, color:C.mid }}>{o.eigenaar} · {o.frequentie} · {o.domein}</div>
+                    </div>
+                    <div style={{ display:'flex', gap:6 }}>
+                      <button onClick={() => setEditing(editing===o.id ? null : o.id)}
+                        style={{ background:'none', border:'none', cursor:'pointer', color:C.navyLt, fontSize:13 }}>
+                        {editing===o.id ? '▲' : '▼'}
+                      </button>
+                      <button onClick={() => del(o.id)} style={{ background:'none', border:'none', cursor:'pointer', color:C.light, fontSize:16 }}>×</button>
+                    </div>
+                  </div>
+
+                  {editing === o.id && (
+                    <div style={{ display:'flex', flexDirection:'column', gap:10 }} className="fade-in">
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                        {[['naam','Naam'],['eigenaar','Eigenaar'],['deelnemers','Deelnemers']].map(([k,l]) => (
+                          <div key={k} style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                            <label style={{ ...S.label, fontSize:11 }}>{l}</label>
+                            <input style={{ ...S.inp, fontSize:13 }} value={o[k]||''} onChange={e => update(o.id,k,e.target.value)} />
+                          </div>
+                        ))}
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <label style={{ ...S.label, fontSize:11 }}>Domein</label>
+                          <select style={{ ...S.inp, fontSize:13 }} value={o.domein||''} onChange={e => update(o.id,'domein',e.target.value)}>
+                            {['Netwerk','Team & HR','Overleg','Inhoudelijk dossier'].map(v => <option key={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <label style={{ ...S.label, fontSize:11 }}>Type</label>
+                          <select style={{ ...S.inp, fontSize:13 }} value={o.type||''} onChange={e => update(o.id,'type',e.target.value)}>
+                            {['Intern','Extern','Beide'].map(v => <option key={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <label style={{ ...S.label, fontSize:11 }}>Frequentie</label>
+                          <select style={{ ...S.inp, fontSize:13 }} value={o.frequentie||''} onChange={e => update(o.id,'frequentie',e.target.value)}>
+                            {['Wekelijks','Tweewekelijks','Maandelijks','Kwartaal','Ad hoc','Wisselend'].map(v => <option key={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <label style={{ ...S.label, fontSize:11 }}>Prioriteit</label>
+                          <select style={{ ...S.inp, fontSize:13 }} value={o.prioriteit||''} onChange={e => update(o.id,'prioriteit',e.target.value)}>
+                            {['Hoog','Medium','Laag','Geen prio','Nvt'].map(v => <option key={v}>{v}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                        <label style={{ ...S.label, fontSize:11 }}>Doel</label>
+                        <textarea style={{ ...S.ta, fontSize:13 }} rows={2} value={o.doel||''} onChange={e => update(o.id,'doel',e.target.value)} />
+                      </div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                        <label style={{ ...S.label, fontSize:11 }}>Relaties met andere overleggen</label>
+                        <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                          {namen.filter(n => n !== o.naam).map(n => (
+                            <button key={n} onClick={() => update(o.id,'relaties', o.relaties.includes(n) ? o.relaties.filter(r=>r!==n) : [...o.relaties,n])}
+                              style={{ padding:'4px 10px', borderRadius:16, fontSize:11, border:`1.5px solid ${o.relaties.includes(n) ? C.navy : C.border}`, background: o.relaties.includes(n) ? C.navy+'18' : C.white, color: o.relaties.includes(n) ? C.navy : C.mid, cursor:'pointer' }}>
+                              {n}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <label style={{ ...S.label, fontSize:11 }}>Stand van zaken</label>
+                          <textarea style={{ ...S.ta, fontSize:13 }} rows={2} value={o.standVanZaken||''} onChange={e => update(o.id,'standVanZaken',e.target.value)} />
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <label style={{ ...S.label, fontSize:11 }}>Acties nodig</label>
+                          <textarea style={{ ...S.ta, fontSize:13 }} rows={2} value={o.actiesNodig||''} onChange={e => update(o.id,'actiesNodig',e.target.value)} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── TOETSING ── */}
+          {tab === 'toetsing' && (
+            <div className="fade-in">
+              <div style={{ fontSize:13, color:C.mid, marginBottom:16 }}>
+                Beantwoord per overleg drie toetsvragen. Groen = Ja, Oranje = Deels, Rood = Nee.
+              </div>
+              {overleggen.map(o => (
+                <div key={o.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:16, marginBottom:10, borderLeft:`3px solid ${toetsTotaal(o) ? TOETS_COLORS[toetsTotaal(o)] : C.border}` }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                    <div>
+                      <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700 }}>{o.naam}</div>
+                      <div style={{ fontSize:11, color:C.mid }}>{o.eigenaar} · {o.type}</div>
+                    </div>
+                    {toetsTotaal(o) && <span style={S.pill(TOETS_COLORS[toetsTotaal(o)]||C.mid)}>{toetsTotaal(o)}</span>}
+                  </div>
+                  {TOETS_VRAGEN.map(v => (
+                    <div key={v.id} style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:12, color:C.mid, marginBottom:4 }}>{v.label}</div>
+                      <div style={{ display:'flex', gap:6 }}>
+                        {['Ja','Deels','Nee'].map(opt => (
+                          <button key={opt} onClick={() => updateToets(o.id, v.id, o.toets?.[v.id]===opt ? undefined : opt)}
+                            style={{ padding:'5px 14px', borderRadius:16, fontSize:12, border:`1.5px solid ${o.toets?.[v.id]===opt ? TOETS_COLORS[opt] : C.border}`, background: o.toets?.[v.id]===opt ? TOETS_COLORS[opt]+'18' : C.white, color: o.toets?.[v.id]===opt ? TOETS_COLORS[opt] : C.mid, cursor:'pointer', fontWeight: o.toets?.[v.id]===opt ? 600 : 400 }}>
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ marginTop:8 }}>
+                    <label style={{ ...S.label, fontSize:11 }}>Toelichting toetsing</label>
+                    <textarea style={{ ...S.ta, fontSize:12 }} rows={2} value={o.toelichting||''} onChange={e => update(o.id,'toelichting',e.target.value)} placeholder="Optioneel — aanvulling op de scores" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── NETWERK ── */}
+          {tab === 'netwerk' && (
+            <div className="fade-in">
+              <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+                {[['graph','🔗 Overlegnetwerk'],['persoon','👤 Persoonsniveau']].map(([id,lbl]) => (
+                  <button key={id} onClick={() => setNetwerkTab(id)}
+                    style={{ ...S.btnS, background: netwerkTab===id ? C.navyLt : 'transparent', color: netwerkTab===id ? C.white : C.navy, fontSize:12 }}>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+
+              {netwerkTab === 'graph' && (
+                <>
+                  <NetworkGraph overleggen={overleggen} />
+                  <div style={{ marginTop:20 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+                      <div style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.navy }}>AI-analyse overlegstructuur</div>
+                      <button style={S.btnP} onClick={analyzeAI} disabled={aiLoading}>
+                        {aiLoading ? <><Spinner /> Analyseren…</> : '🔍 Analyseer'}
+                      </button>
+                    </div>
+                    {aiErr && <div style={{ fontSize:13, color:C.red, marginBottom:10 }}>{aiErr}</div>}
+                    {aiText && (
+                      <>
+                        <div style={S.aiBox}>{aiText}</div>
+                        <div style={{ display:'flex', gap:8, marginTop:12 }}>
+                          <button style={S.btnS} onClick={() => navigator.clipboard?.writeText(aiText)}>📋 Kopieer analyse</button>
+                          <button style={S.btnS} onClick={() => {
+                            const win = window.open('', '_blank');
+                            if (!win) return;
+                            win.document.write(`<!DOCTYPE html><html lang="nl"><head><meta charset="UTF-8"/><title>Overleganalyse B&S</title>
+                            <link href="https://fonts.googleapis.com/css2?family=Lora:wght@700&family=Inter:wght@400;600&display=swap" rel="stylesheet"/>
+                            <style>body{font-family:'Inter',sans-serif;padding:40px;max-width:800px;margin:0 auto;color:#1C1C1C;}h1{font-family:'Lora',serif;color:#1A3057;font-size:20px;margin-bottom:4px;}.sub{font-size:12px;color:#888;margin-bottom:28px;padding-bottom:12px;border-bottom:2px solid #D5CFBF;}pre{white-space:pre-wrap;font-family:'Inter',sans-serif;font-size:14px;line-height:1.8;}.btn{position:fixed;top:20px;right:20px;background:#1A3057;color:white;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;}@media print{.btn{display:none;}}</style>
+                            </head><body><button class="btn" onclick="window.print()">🖨 Print / PDF</button>
+                            <h1>Analyse overlegstructuur — B&S OM Parket Den Haag</h1>
+                            <div class="sub">Gegenereerd op ${new Date().toLocaleDateString('nl-NL',{day:'numeric',month:'long',year:'numeric'})}</div>
+                            <pre>${aiText}</pre></body></html>`);
+                            win.document.close();
+                          }}>🖨 Exporteer / Print</button>
+                        </div>
+                      </>
+                    )}
+                    {!aiText && !aiLoading && <div style={{ fontSize:13, color:C.mid, fontStyle:'italic' }}>Klik op "Analyseer" om een AI-analyse van de overlegstructuur te genereren.</div>}
+                  </div>
+                </>
+              )}
+
+              {netwerkTab === 'persoon' && <PersoonView overleggen={overleggen} />}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const toetsTotaalFn = (o) => {
+      const vals = Object.values(o.toets || {});
+      if (!vals.length) return null;
+      if (vals.every(v => v === 'Ja')) return 'Ja';
+      if (vals.some(v => v === 'Nee')) return 'Nee';
+      return 'Deels';
+    };
+
+    function PersoonView({ overleggen }) {
+      const [zoek, setZoek] = useState('');
+      const [selectie, setSelectie] = useState(null);
+
+      // Verzamel alle personen uit eigenaar + deelnemers velden
+      const personen = React.useMemo(() => {
+        const set = new Set();
+        overleggen.forEach(o => {
+          if (o.eigenaar) o.eigenaar.split(/[,/·]/).map(s => s.trim()).filter(Boolean).forEach(p => set.add(p));
+          if (o.deelnemers) o.deelnemers.split(/[,/·]/).map(s => s.trim()).filter(Boolean).forEach(p => set.add(p));
+        });
+        return [...set].sort();
+      }, [overleggen]);
+
+      const gefilterd = zoek.length > 1
+        ? personen.filter(p => p.toLowerCase().includes(zoek.toLowerCase()))
+        : personen;
+
+      const overleggenVanPersoon = (naam) => overleggen.filter(o => {
+        const alle = [o.eigenaar, o.deelnemers].join(' / ');
+        return alle.toLowerCase().includes(naam.toLowerCase());
+      });
+
+      const medePersonen = (naam) => {
+        const ovs = overleggenVanPersoon(naam);
+        const set = new Set();
+        ovs.forEach(o => {
+          [o.eigenaar, o.deelnemers].join(' / ').split(/[,/·]/).map(s=>s.trim()).filter(Boolean)
+            .forEach(p => { if (p !== naam && p.length > 2) set.add(p); });
+        });
+        return [...set];
+      };
+
+      const geselecteerdeOverleggen = selectie ? overleggenVanPersoon(selectie) : [];
+
+      return (
+        <div>
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:20, marginBottom:16 }}>
+            <div style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.navy, marginBottom:12 }}>Zoek op naam of functie</div>
+            <input style={{ ...S.inp, marginBottom:12 }} placeholder="Typ een naam — bijv. Hilde, Marcel, Hanneke…"
+              value={zoek} onChange={e => { setZoek(e.target.value); setSelectie(null); }} />
+            <div style={{ display:'flex', flexWrap:'wrap', gap:6, maxHeight:160, overflowY:'auto' }}>
+              {gefilterd.map(p => (
+                <button key={p} onClick={() => setSelectie(p === selectie ? null : p)}
+                  style={{ padding:'5px 12px', borderRadius:20, fontSize:12, border:`1.5px solid ${selectie===p ? C.navy : C.border}`, background: selectie===p ? C.navy : C.white, color: selectie===p ? C.white : C.mid, cursor:'pointer', fontWeight: selectie===p ? 600 : 400 }}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {selectie && (
+            <div className="fade-in">
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, overflow:'hidden', marginBottom:16 }}>
+                <div style={{ background:C.navy, padding:'12px 18px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <div>
+                    <div style={{ fontFamily:"'Lora',serif", fontSize:15, fontWeight:700, color:C.white }}>{selectie}</div>
+                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)' }}>{geselecteerdeOverleggen.length} overleggen</div>
+                  </div>
+                  <button onClick={() => setSelectie(null)} style={{ background:'none', border:'none', color:'rgba(255,255,255,0.5)', fontSize:20, cursor:'pointer' }}>×</button>
+                </div>
+                <div style={{ padding:16 }}>
+                  {geselecteerdeOverleggen.map(o => (
+                    <div key={o.id} style={{ padding:'10px 14px', borderRadius:8, border:`1px solid ${C.border}`, marginBottom:8, borderLeft:`3px solid ${TYPE_COLORS[o.type]||C.border}` }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                        <div>
+                          <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700 }}>{o.naam}</div>
+                          <div style={{ fontSize:11, color:C.mid, marginTop:2 }}>
+                            {o.type} · {o.frequentie} · Prio: {o.prioriteit}
+                          </div>
+                          {o.eigenaar && o.eigenaar.toLowerCase().includes(selectie.toLowerCase()) && (
+                            <span style={{ ...S.pill(C.navy), fontSize:10, marginTop:4, display:'inline-block' }}>Eigenaar</span>
+                          )}
+                        </div>
+                      {toetsTotaalFn(o) && <span style={S.pill(TOETS_COLORS[toetsTotaalFn(o)]||C.mid)}>{toetsTotaalFn(o)}</span>}
+                      </div>
+                      {o.doel && <div style={{ fontSize:12, color:C.mid, marginTop:6, fontStyle:'italic' }}>{o.doel.slice(0,100)}{o.doel.length>100?'…':''}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {medePersonen(selectie).length > 0 && (
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:16 }}>
+                  <div style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.navy, marginBottom:12 }}>
+                    Collega's in dezelfde overleggen
+                  </div>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                    {medePersonen(selectie).map(p => {
+                      const gedeeld = overleggenVanPersoon(selectie).filter(o =>
+                        [o.eigenaar, o.deelnemers].join(' / ').toLowerCase().includes(p.toLowerCase())
+                      ).length;
+                      return (
+                        <button key={p} onClick={() => setSelectie(p)}
+                          style={{ padding:'6px 14px', borderRadius:20, fontSize:12, border:`1.5px solid ${C.border}`, background:C.creamDk, color:C.navy, cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
+                          {p}
+                          <span style={{ background:C.navy, color:C.white, borderRadius:10, padding:'1px 6px', fontSize:10, fontWeight:700 }}>{gedeeld}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize:11, color:C.light, marginTop:8 }}>Getal = aantal gedeelde overleggen · Klik om door te klikken</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!selectie && (
+            <div style={S.empty}>
+              <div style={{ fontSize:14 }}>Kies een persoon om te zien in welke overleggen hij of zij zit en met wie.</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function NetworkGraph({ overleggen }) {
+      const containerRef = React.useRef();
+      const [fullscreen, setFullscreen] = useState(false);
+      const PRIO_SIZE = { Hoog: 22, Medium: 15, Laag: 10, 'Geen prio': 10, Nvt: 10 };
+
+      const buildGraph = React.useCallback((el) => {
+        if (!el || typeof d3 === 'undefined') return;
+        d3.select(el).selectAll('*').remove();
+
+        const w = el.offsetWidth || 700, h = fullscreen ? window.innerHeight - 120 : 650;
+        const svg = d3.select(el).append('svg').attr('width', w).attr('height', h).style('display','block');
+        svg.append('rect').attr('width', w).attr('height', h).attr('fill', '#F6F2EA').attr('rx', 10);
+
+        const g = svg.append('g');
+        const zoom = d3.zoom().scaleExtent([0.15, 5]).on('zoom', e => g.attr('transform', e.transform));
+        svg.call(zoom);
+
+        svg.append('text').attr('x', 10).attr('y', h - 10)
+          .attr('font-size', 10).attr('fill', '#AAA').attr('font-family', 'Inter, sans-serif')
+          .text('Scroll = zoom · Sleep achtergrond = pan · Sleep bolletje = verplaatsen (blijft vast)');
+
+        const nodes = overleggen.map(o => ({
+          id: o.naam, type: o.type, prio: o.prioriteit, eigenaar: o.eigenaar,
+          toets: Object.values(o.toets||{}), fixed: false
+        }));
+        const links = [];
+        overleggen.forEach(o => {
+          (o.relaties||[]).forEach(r => {
+            if (overleggen.find(x => x.naam === r)) links.push({ source: o.naam, target: r });
+          });
+        });
+
+        const sim = d3.forceSimulation(nodes)
+          .force('link', d3.forceLink(links).id(d => d.id).distance(120))
+          .force('charge', d3.forceManyBody().strength(-220))
+          .force('center', d3.forceCenter(w/2, h/2))
+          .force('collision', d3.forceCollide(d => (PRIO_SIZE[d.prio]||12) + 22));
+
+        const link = g.append('g').selectAll('line').data(links).join('line')
+          .attr('stroke', '#C0B8A8').attr('stroke-width', 1.5);
+
+        const node = g.append('g').selectAll('g').data(nodes).join('g').style('cursor','grab')
+          .call(d3.drag()
+            .filter(e => !e.ctrlKey && !e.button)
+            .on('start', (e,d) => {
+              e.sourceEvent.stopPropagation();
+              if (!e.active) sim.alphaTarget(0.3).restart();
+              d.fx = d.x; d.fy = d.y;
+            })
+            .on('drag', (e,d) => { d.fx = e.x; d.fy = e.y; })
+            .on('end', (e,d) => {
+              if (!e.active) sim.alphaTarget(0);
+              // Keep node pinned where dropped
+              d.fx = e.x; d.fy = e.y;
+            })
+          );
+
+        node.append('circle')
+          .attr('r', d => PRIO_SIZE[d.prio]||12)
+          .attr('fill', d => TYPE_COLORS[d.type]||C.navy)
+          .attr('opacity', 0.88)
+          .attr('stroke', C.white).attr('stroke-width', 2);
+
+        // Double-click to unpin
+        node.on('dblclick', (e, d) => { e.stopPropagation(); d.fx = null; d.fy = null; sim.alphaTarget(0.1).restart(); });
+
+        node.append('text')
+          .attr('text-anchor','middle')
+          .attr('dy', d => (PRIO_SIZE[d.prio]||12) + 13)
+          .attr('font-size', 9).attr('fill', C.navy).attr('font-weight','600')
+          .attr('pointer-events','none')
+          .text(d => d.id.length > 20 ? d.id.slice(0,18)+'…' : d.id);
+
+        const tooltip = d3.select(el).append('div')
+          .style('position','absolute').style('background', C.navyDk).style('color', C.white)
+          .style('padding','8px 12px').style('border-radius','8px').style('font-size','12px')
+          .style('pointer-events','none').style('opacity',0).style('max-width','240px')
+          .style('font-family',"'Inter', sans-serif").style('line-height','1.6').style('z-index','20');
+
+        node.on('mouseenter', (e,d) => {
+          const vals = d.toets;
+          const t = vals.length ? (vals.every(v=>v==='Ja') ? '✅' : vals.some(v=>v==='Nee') ? '❌' : '⚠') : '–';
+          tooltip.style('opacity',1).html(`<strong>${d.id}</strong><br/>${d.eigenaar||'geen eigenaar'}<br/>${d.prio} · ${d.type} · ${t}<br/><em style="font-size:10px;opacity:0.6">Dubbelklik om los te maken</em>`);
+        }).on('mousemove', e => {
+          const rect = el.getBoundingClientRect();
+          tooltip.style('left', (e.clientX-rect.left+14)+'px').style('top', (e.clientY-rect.top-40)+'px');
+        }).on('mouseleave', () => tooltip.style('opacity', 0));
+
+        sim.on('tick', () => {
+          link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+              .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+          node.attr('transform', d => `translate(${d.x},${d.y})`);
+        });
+
+        return () => sim.stop();
+      }, [overleggen, fullscreen]);
+
+      React.useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        return buildGraph(el);
+      }, [buildGraph]);
+
+      const legenda = [['Intern',C.navy],['Extern',C.gold],['Beide',C.green]];
+      const h = fullscreen ? window.innerHeight - 120 : 650;
+
+      return (
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, overflow:'hidden' }}>
+          <div style={{ background:C.navy, padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8 }}>
+            <span style={{ fontFamily:"'Lora',serif", fontSize:13, fontWeight:700, color:C.white }}>Netwerkvisualisatie</span>
+            <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'center' }}>
+              {legenda.map(([lbl,col]) => (
+                <div key={lbl} style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'rgba(255,255,255,0.7)' }}>
+                  <div style={{ width:10, height:10, borderRadius:'50%', background:col }} />{lbl}
+                </div>
+              ))}
+              <span style={{ fontSize:10, color:'rgba(255,255,255,0.4)' }}>Groot = hoge prio</span>
+              <button onClick={() => setFullscreen(f => !f)}
+                style={{ background:'rgba(255,255,255,0.15)', border:'none', color:C.white, borderRadius:6, padding:'4px 10px', fontSize:11, cursor:'pointer' }}>
+                {fullscreen ? '⊡ Kleiner' : '⊞ Volledig scherm'}
+              </button>
+            </div>
+          </div>
+          <div ref={containerRef} style={{ position:'relative', width:'100%', height:h }} />
+        </div>
+      );
+    }
+
+    // ─── DASHBOARD ────────────────────────────────────────────────────────────
+    const FASE_DEF = [
+      { id:'f0',  label:'Fase 0',  titel:'Mandate ophalen',
+        beschrijving:'Bevestigde opdracht + rolverdeling teamleider',
+        checkItems:['Gesprek met hoofdofficier','Opdrachtnotitie verstuurd','Bevestiging ontvangen','Rolverdeling teamleider vastgesteld'] },
+      { id:'f1',  label:'Fase 1',  titel:'Diagnose & kennismakingen',
+        beschrijving:'Gesprekken medewerkers + selectie stakeholders · Bevindingsnotitie',
+        checkItems:['Gesprekken medewerkers (doel: ~15)','Gesprekken stakeholders (doel: 4-6)','MTO/bronnen verwerkt','Patroonanalyse gedraaid','Bevindingsnotitie geschreven'] },
+      { id:'f1b', label:'Fase 1B', titel:'Parketleiding, MT en afdeling',
+        beschrijving:'Interviews parketleiding · DECIDE · MT-communicatie · Afdeling informeren',
+        checkItems:['Interview hoofdofficier','Interview plaatsvervangend hoofdofficier','Interview directeur bedrijfsvoering','DECIDE-moment — scenariokeuze + commitment','MT-communicatie','Afdeling informeren'] },
+      { id:'f1c', label:'Fase 1C', titel:'Positionering en taakomschrijving',
+        beschrijving:'Positiedocument vastgesteld · Taakomschrijving per cluster · Clusters geïnformeerd',
+        checkItems:['Positiedocument geschreven','Positiedocument vastgesteld door hoofdofficier','Voorlopige taakomschrijving per cluster','Clusters geïnformeerd met kader'] },
+      { id:'f2',  label:'Fase 2',  titel:'Clusters aan het werk',
+        beschrijving:'Clusters voeren stakeholdergesprekken · Clusterverslagen',
+        checkItems:['Clusteropdrachten gegeven','Clusterverslagen ontvangen','Gezamenlijk beeld gevormd'] },
+      { id:'f3',  label:'Fase 3',  titel:'Afdelingsdocument',
+        beschrijving:'Missie · Leidende principes · Rolverwachtingen per cluster',
+        checkItems:['Afdelingsdocument geschreven','Afdelingsdocument vastgesteld','Gecommuniceerd naar afdeling'] },
+      { id:'f4',  label:'Fase 4',  titel:'Borging',
+        beschrijving:'Overlegstructuur · Gedragsindicatoren · Bijsturing na 6 maanden',
+        checkItems:['Overlegstructuur ingevoerd','Gedragsindicatoren nulmeting','Bijsturingsmoment 6 maanden gepland'] },
+    ];
+
+    function DashboardView({ gesprekken, bronnen, onNav }) {
+      const [checks, setChecks] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('om-dashboard-checks') || '{}'); } catch { return {}; }
+      });
+      const [activeFase, setActiveFase] = useState(() => {
+        return localStorage.getItem('om-dashboard-fase') || 'f1';
+      });
+      const [openFase, setOpenFase] = useState('f1');
+
+      const saveChecks = (c) => { setChecks(c); try { localStorage.setItem('om-dashboard-checks', JSON.stringify(c)); } catch {} };
+      const setFase = (id) => { setActiveFase(id); try { localStorage.setItem('om-dashboard-fase', id); } catch {} };
+
+      const toggle = (faseId, idx) => {
+        const key = `${faseId}_${idx}`;
+        saveChecks({ ...checks, [key]: !checks[key] });
+      };
+
+      const faseProgress = (f) => {
+        const done = f.checkItems.filter((_, i) => checks[`${f.id}_${i}`]).length;
+        return { done, total: f.checkItems.length };
+      };
+
+      const STATUS_STYLE = {
+        afgerond: { bg: C.greenLt, border: C.green, color: C.green, dot: C.green },
+        actief:   { bg: '#EEF3FA', border: C.navyLt, color: C.navyLt, dot: C.navyLt },
+        open:     { bg: C.creamDk, border: C.border, color: C.light, dot: C.border },
+      };
+
+      const getFaseStatus = (f) => {
+        const { done, total } = faseProgress(f);
+        if (done === total) return 'afgerond';
+        if (f.id === activeFase) return 'actief';
+        return 'open';
+      };
+
+      const aktief = FASE_DEF.find(f => f.id === activeFase);
+      const M = gesprekken.filter(g => g.type==='medewerker').length;
+      const S = gesprekken.filter(g => g.type==='stakeholder').length;
+      const PL = gesprekken.filter(g => g.type==='parketleiding').length;
+
+      return (
+        <div>
+          {/* Page header */}
+          <div style={{ marginBottom:24 }}>
+            <div style={{ fontFamily:"'Lora',serif", fontSize:24, fontWeight:700, color:C.navy, marginBottom:4 }}>
+              Afdelingsontwikkeling B&S
+            </div>
+            <div style={{ fontSize:13, color:C.mid }}>OM Parket Den Haag · 2026</div>
+          </div>
+
+          {/* Status banner */}
+          {aktief && (
+            <div style={{ background:C.navy, borderRadius:12, padding:'16px 22px', marginBottom:24, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 }}>
+              <div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,0.5)', marginBottom:3 }}>Je zit nu in</div>
+                <div style={{ fontFamily:"'Lora',serif", fontSize:16, fontWeight:700, color:C.white }}>
+                  {aktief.label} — {aktief.titel}
+                </div>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)', marginTop:3 }}>{aktief.beschrijving}</div>
+              </div>
+              <div style={{ display:'flex', gap:20 }}>
+                {[['Medewerkers',M],['Stakeholders',S],['Parketleiding',PL],['Bronnen',bronnen.length]].map(([lbl,val]) => (
+                  <div key={lbl} style={{ textAlign:'center' }}>
+                    <div style={{ fontSize:24, fontWeight:700, color:C.white, lineHeight:1 }}>{val}</div>
+                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.45)', marginTop:3 }}>{lbl}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Fase markering */}
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:20, flexWrap:'wrap' }}>
+            <span style={{ fontSize:12, color:C.mid }}>Actieve fase:</span>
+            {FASE_DEF.map(f => (
+              <button key={f.id} onClick={() => setFase(f.id)}
+                style={{ padding:'5px 12px', borderRadius:20, fontSize:11, fontWeight:600, border:`1.5px solid ${activeFase===f.id ? C.navy : C.border}`, background: activeFase===f.id ? C.navy : C.white, color: activeFase===f.id ? C.white : C.mid, cursor:'pointer', transition:'all 0.15s' }}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Fase kaarten */}
+          {FASE_DEF.map(fase => {
+            const st = getFaseStatus(fase);
+            const style = STATUS_STYLE[st];
+            const { done, total } = faseProgress(fase);
+            const isOpen = openFase === fase.id;
+
+            return (
+              <div key={fase.id} style={{ background: st==='actief' ? C.white : st==='afgerond' ? C.greenLt : C.creamDk, border:`1.5px solid ${style.border}`, borderRadius:12, marginBottom:10, overflow:'hidden', boxShadow: st==='actief' ? '0 2px 12px rgba(26,48,87,0.1)' : 'none' }}>
+                {/* Header */}
+                <div style={{ padding:'14px 18px', cursor:'pointer', display:'flex', alignItems:'flex-start', gap:14 }} onClick={() => setOpenFase(isOpen ? null : fase.id)}>
+                  <div style={{ background: st==='actief' ? C.navy : st==='afgerond' ? C.green : C.border, color:C.white, borderRadius:8, padding:'4px 10px', fontSize:11, fontWeight:700, flexShrink:0, marginTop:2 }}>
+                    {fase.label}
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                      <div>
+                        <div style={{ fontFamily:"'Lora',serif", fontSize:14, fontWeight:700, color:C.navy, marginBottom:2 }}>{fase.titel}</div>
+                        <div style={{ fontSize:11, color:C.mid }}>{fase.beschrijving}</div>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0, marginLeft:12 }}>
+                        <span style={{ fontSize:11, fontWeight:600, color:style.color, background:style.bg, border:`1px solid ${style.border}`, padding:'3px 10px', borderRadius:20 }}>
+                          {st==='afgerond' ? '✓ Afgerond' : st==='actief' ? '● Actief' : '○ Open'}
+                        </span>
+                        <span style={{ color:C.light, fontSize:16 }}>{isOpen ? '−' : '+'}</span>
+                      </div>
+                    </div>
+                    {st !== 'open' && (
+                      <div style={{ marginTop:8, display:'flex', alignItems:'center', gap:8 }}>
+                        <div style={{ flex:1, height:4, background:C.creamDk, borderRadius:2, overflow:'hidden' }}>
+                          <div style={{ width:`${(done/total)*100}%`, height:'100%', background: st==='afgerond' ? C.green : C.navyLt, borderRadius:2 }} />
+                        </div>
+                        <span style={{ fontSize:10, color:C.mid }}>{done}/{total}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Body */}
+                {isOpen && (
+                  <div style={{ padding:'0 18px 18px', borderTop:`1px solid ${style.border}44` }} className="fade-in">
+                    <div style={{ paddingTop:14 }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:C.navy, marginBottom:10 }}>Stappen</div>
+                      {fase.checkItems.map((item, i) => {
+                        const key = `${fase.id}_${i}`;
+                        const done = !!checks[key];
+                        return (
+                          <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:10, marginBottom:8, cursor:'pointer' }}
+                            onClick={() => toggle(fase.id, i)}>
+                            <div style={{ width:18, height:18, borderRadius:5, flexShrink:0, marginTop:1, background: done ? C.green : C.white, border:`2px solid ${done ? C.green : C.border}`, display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.15s' }}>
+                              {done && <span style={{ color:C.white, fontSize:10, fontWeight:700 }}>✓</span>}
+                            </div>
+                            <span style={{ fontSize:13, color: done ? C.mid : C.text, textDecoration: done ? 'line-through' : 'none', lineHeight:1.4 }}>{item}</span>
+                          </div>
+                        );
+                      })}
+
+                      {/* Fase 1 live stats */}
+                      {fase.id === 'f1' && (
+                        <div style={{ marginTop:14, padding:'12px 14px', background:C.creamDk, borderRadius:8 }}>
+                          <div style={{ fontSize:11, fontWeight:700, color:C.navy, marginBottom:10 }}>Live voortgang</div>
+                          {[['Medewerkers',M,15,C.navyLt],['Stakeholders',S,6,C.gold],['Bronnen',bronnen.length,5,C.green]].map(([lbl,val,max,col]) => (
+                            <div key={lbl} style={{ marginBottom:8 }}>
+                              <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:C.mid, marginBottom:3 }}>
+                                <span>{lbl}</span><span>{val}/{max}</span>
+                              </div>
+                              <div style={{ height:6, background:C.white, borderRadius:3, overflow:'hidden' }}>
+                                <div style={{ width:`${Math.min((val/max)*100,100)}%`, height:'100%', background:col, borderRadius:3 }} />
+                              </div>
+                            </div>
+                          ))}
+                          <button onClick={() => onNav('gesprekken')} style={{ ...S.btnS, fontSize:11, padding:'5px 12px', marginTop:6 }}>→ Naar gesprekken</button>
+                        </div>
+                      )}
+
+                      {/* Fase 1B live stats */}
+                      {fase.id === 'f1b' && (
+                        <div style={{ marginTop:14, padding:'12px 14px', background:C.creamDk, borderRadius:8 }}>
+                          <div style={{ fontSize:11, fontWeight:700, color:C.navy, marginBottom:6 }}>Parketleidingsgesprekken</div>
+                          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                            <div style={{ flex:1, height:6, background:C.white, borderRadius:3, overflow:'hidden' }}>
+                              <div style={{ width:`${(PL/3)*100}%`, height:'100%', background:C.green, borderRadius:3 }} />
+                            </div>
+                            <span style={{ fontSize:11, color:C.mid }}>{PL}/3</span>
+                          </div>
+                          <button onClick={() => onNav('gesprekken')} style={{ ...S.btnS, fontSize:11, padding:'5px 12px', marginTop:8 }}>→ Parketleiding gesprek toevoegen</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ─── INSTELLINGEN ─────────────────────────────────────────────────────────
+    function InstellingenView({ apiKey, onSaveKey, gesprekken, bronnen, overleggen, onImport }) {
+      const [key, setKey] = useState(apiKey);
+      const [saved, setSaved] = useState(false);
+      const [importErr, setImportErr] = useState('');
+      const [importOk, setImportOk] = useState('');
+      const fileRef = React.useRef();
+
+      const save = () => { onSaveKey(key); setSaved(true); setTimeout(() => setSaved(false), 2000); };
+
+      const exportData = () => {
+        const data = { versie: 1, datum: new Date().toISOString(), gesprekken, bronnen, overleggen };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `om-gesprekken-${new Date().toISOString().slice(0,10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      const importData = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const data = JSON.parse(ev.target.result);
+            if (!data.gesprekken) throw new Error('Ongeldig bestand');
+            onImport(data);
+            setImportErr('');
+            setImportOk(`${data.gesprekken.length} gesprekken en ${(data.bronnen||[]).length} bronnen teruggezet.`);
+            setTimeout(() => setImportOk(''), 4000);
+          } catch {
+            setImportErr('Ongeldig bestand — controleer of je het juiste JSON-bestand uploadt.');
+          }
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+      };
+
+      return (
+        <div>
+          <div style={S.secTitle}>Instellingen</div>
+
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginTop:20 }}>
+            <div style={{ fontFamily:"'Lora',serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:6 }}>Back-up</div>
+            <div style={{ fontSize:13, color:C.mid, marginBottom:16 }}>
+              Exporteer alle gesprekken en bronnen als JSON. Bewaar dit op een veilige plek — je kunt het altijd terugzetten, ook na een URL-wijziging of herinstallatie.
+            </div>
+            <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+              <button style={S.btnP} onClick={exportData}>⬇ Exporteer ({gesprekken.length} gesprekken · {overleggen.length} overleggen)</button>
+              <button style={S.btnS} onClick={() => fileRef.current.click()}>⬆ Importeer back-up</button>
+              <input ref={fileRef} type="file" accept=".json" style={{ display:'none' }} onChange={importData} />
+            </div>
+            {importOk && <div style={{ fontSize:13, color:C.green, marginTop:10, fontWeight:600 }}>✓ {importOk}</div>}
+            {importErr && <div style={{ fontSize:13, color:C.red, marginTop:10 }}>{importErr}</div>}
+          </div>
+
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginTop:16 }}>
+            <div style={{ fontFamily:"'Lora',serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:16 }}>API-sleutel</div>
+            <label style={S.label}>Anthropic API-sleutel</label>
+            <input style={{ ...S.inp, fontFamily:'monospace', fontSize:13, marginBottom:8 }}
+              type="password" placeholder="sk-ant-..." value={key} onChange={e => setKey(e.target.value)} />
+            <div style={{ fontSize:12, color:C.light, marginBottom:16 }}>
+              Haal je sleutel op via <a href="https://console.anthropic.com" target="_blank" style={{ color:C.navyLt }}>console.anthropic.com</a>
+            </div>
+            <button style={S.btnP} onClick={save}>{saved ? '✓ Opgeslagen' : 'Sleutel opslaan'}</button>
+          </div>
+
+          <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:24, marginTop:16 }}>
+            <div style={{ fontFamily:"'Lora',serif", fontSize:15, fontWeight:700, color:C.navy, marginBottom:16 }}>Gegevens</div>
+            <div style={{ fontSize:14, color:C.mid, marginBottom:16 }}>{gesprekken.length} gesprekken · {bronnen.length} bronnen in lokale opslag.</div>
+            <button style={{ ...S.btnS, color:C.red, borderColor:C.red }}
+              onClick={() => { if(window.confirm('Alle gesprekken, bronnen en diagnose definitief verwijderen?')) { localStorage.removeItem('om-gesprekken'); localStorage.removeItem('om-context'); localStorage.removeItem('om-diagnose'); window.location.reload(); } }}>
+              Alle gegevens verwijderen
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── MAIN APP ─────────────────────────────────────────────────────────────
+    function App() {
+      const [apiKey, setApiKeyState] = useState(() => store.getApiKey());
+      const [showSetup, setShowSetup] = useState(() => !store.getApiKey());
+      const [view, setView] = useState('dashboard');
+      const [gesprekken, setGesprekken] = useState(() => store.loadGesprekken());
+      const [bronnen, setBronnen] = useState(() => store.loadContext());
+      const [overleggen, setOverleggen] = useState(() => store.loadOverleggen() || START_OVERLEGGEN);
+      const [editingId, setEditingId] = useState(null);
+
+      useEffect(() => { store.saveGesprekken(gesprekken); }, [gesprekken]);
+      useEffect(() => { store.saveContext(bronnen); }, [bronnen]);
+      useEffect(() => { store.saveOverleggen(overleggen); }, [overleggen]);
+
+      const handleImport = useCallback((data) => {
+        setGesprekken(data.gesprekken || []);
+        setBronnen(data.bronnen || []);
+        if (data.overleggen) setOverleggen(data.overleggen);
+      }, []);
+
+      const handleSaveKey = (k) => { store.setApiKey(k); setApiKeyState(k); setShowSetup(false); };
+      const handleSave = useCallback((data) => {
+        if (editingId) setGesprekken(prev => prev.map(g => g.id===editingId ? { ...data, id:editingId } : g));
+        else setGesprekken(prev => [...prev, { ...data, id:uid() }]);
+        setEditingId(null); setView('gesprekken');
+      }, [editingId]);
+
+      if (showSetup) return <SetupView onSave={handleSaveKey} />;
+
+      const navItems = [
+        { id:'dashboard',    label:'Dashboard',    },
+        { id:'gesprekken',   label:'Gesprekken',   },
+        { id:'patronen',     label:'Patronen',     },
+        { id:'diagnose',     label:'Diagnose',     },
+        { id:'overleggen',   label:'Overleggen',   },
+        { id:'notitie',      label:'Notitie',      },
+        { id:'instellingen', label:'Instellingen', },
+      ];
+
+      return (
+        <div style={S.app}>
+          <header style={S.hdr}>
+            <div style={S.hdrIn}>
+              <div>
+                <div style={S.title}>OM Gesprekken</div>
+                <div style={S.sub}>{gesprekken.length} gesprekken · {gesprekken.filter(g=>g.type==='medewerker').length}M · {gesprekken.filter(g=>g.type==='stakeholder').length}S · {gesprekken.filter(g=>g.type==='parketleiding').length}PL{bronnen.length > 0 ? ` · ${bronnen.length} bronnen` : ''}</div>
+              </div>
+              {view !== 'form' && (
+                <nav style={S.nav}>
+                  {navItems.map(n => (
+                    <button key={n.id} style={S.navBtn(view===n.id)} onClick={() => setView(n.id)}>
+                      {n.label}
+                    </button>
+                  ))}
+                </nav>
+              )}
+            </div>
+          </header>
+          <main style={S.main}>
+            {view==='dashboard' && <DashboardView gesprekken={gesprekken} bronnen={bronnen} onNav={setView} />}
+            {view==='gesprekken' && <GesprekkenView gesprekken={gesprekken} onNew={() => { setEditingId(null); setView('form'); }} onEdit={id => { setEditingId(id); setView('form'); }} onDelete={id => setGesprekken(prev => prev.filter(g => g.id!==id))} />}
+            {view==='form' && <FormView gesprek={editingId ? gesprekken.find(g=>g.id===editingId) : null} onSave={handleSave} onCancel={() => { setEditingId(null); setView('gesprekken'); }} />}
+            {view==='patronen' && <PatronenView gesprekken={gesprekken} apiKey={apiKey} />}
+            {view==='diagnose' && <DiagnoseView gesprekken={gesprekken} bronnen={bronnen} onBronnenChange={setBronnen} apiKey={apiKey} />}
+            {view==='overleggen' && <OverleggenView overleggen={overleggen} onOverleggenChange={setOverleggen} apiKey={apiKey} />}
+            {view==='notitie' && <NotitieView gesprekken={gesprekken} apiKey={apiKey} />}
+            {view==='instellingen' && <InstellingenView apiKey={apiKey} onSaveKey={handleSaveKey} gesprekken={gesprekken} bronnen={bronnen} overleggen={overleggen} onImport={handleImport} />}
+          </main>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>
