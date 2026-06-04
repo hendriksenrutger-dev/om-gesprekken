@@ -54,6 +54,8 @@
       saveContext:     (d) => { try { localStorage.setItem('om-context', JSON.stringify(d)); } catch {} },
       loadOverleggen:  () => { try { return JSON.parse(localStorage.getItem('om-overleggen') || 'null'); } catch { return null; } },
       saveOverleggen:  (d) => { try { localStorage.setItem('om-overleggen', JSON.stringify(d)); } catch {} },
+      loadOverleggenGC: () => { try { return JSON.parse(localStorage.getItem('om-overleggen-gc') || 'null'); } catch { return null; } },
+      saveOverleggenGC: (d) => { try { localStorage.setItem('om-overleggen-gc', JSON.stringify(d)); } catch {} },
       getApiKey:       () => localStorage.getItem('om-api-key') || '',
       setApiKey:       (k) => localStorage.setItem('om-api-key', k),
     };
@@ -1392,13 +1394,105 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
       { naam:'Buikpijnzaken', domein:'Inhoudelijk dossier', type:'Intern', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'Thijs Berger', relaties:[], doel:'Zaken waarin interne tijdlijn wordt opgesteld. Evaluatie afgesproken met Margreet. Auke: geen expliciete leerpunten uit recente zaken.', deelnemers:'Auke, Margreet', standVanZaken:'Terugkoppeling aan afstemmingsoverleg nog te doen.', actiesNodig:'Terugkoppeling aan afstemmingsoverleg. Overwegen of besluit tot tijdlijn steeds terecht wordt genomen.', toelichting:'', toets:{} },
     ].map(o => ({ ...o, id: Math.random().toString(36).slice(2,10) }));
 
+    const START_OVERLEGGEN_GC = [
+      // Driehoeken District F
+      { naam:'Driehoek Leiden', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Leiden. Inclusief vooroverleg. Vaste onderwerpen: BOAs, bestuurlijke rapportages, jeugdgroepen, handhavingsarrangementen, gebiedsverboden, noodverordeningen, cameratoezicht, COA/AZC, gevoelige zaken. Extra: PMOs, TGOs, demos, aangiften burgemeester.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'6x per jaar + vooroverleg. Veel uitzoekwerk en losse telefoontjes.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Katwijk', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Katwijk. Vaste onderwerpen + kraken, voetbal, demos.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'2x per jaar.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Leiderdorp', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Leiderdorp. Vaste onderwerpen + TGOs, aangiften burgemeester.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'2x per jaar.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Noordwijk', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Medium', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Noordwijk. Vaste onderwerpen + aangiften burgemeester.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'2x per jaar + vooroverleg.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Hillegom', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Medium', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Hillegom. Vaste onderwerpen.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'6x per jaar.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Lisse', domein:'Netwerk', type:'Extern', frequentie:'Ad hoc', prioriteit:'Laag', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Lisse.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'Frequentie niet vermeld.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Teylingen', domein:'Netwerk', type:'Extern', frequentie:'Ad hoc', prioriteit:'Laag', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Teylingen.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'Frequentie niet vermeld.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Voorschoten', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Laag', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Voorschoten.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'2x per jaar.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Oegstgeest', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Laag', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Oegstgeest.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'2x per jaar.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Zoeterwoude', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Laag', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Zoeterwoude.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'2x per jaar.', actiesNodig:'', toelichting:'', toets:{} },
+      // Driehoeken District G
+      { naam:'Driehoek Gouda', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Gouda. Vaste onderwerpen + kraken, demos, PMOs, TGOs, aangiften burgemeester. Veel uitzoekwerk.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'6-8x per jaar + vooroverleg.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Alphen aan den Rijn', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Alphen aan den Rijn. Vaste onderwerpen + PMOs, aangiften burgemeester.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'4x per jaar + vooroverleg.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Bodegraven-Reeuwijk', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Medium', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Bodegraven-Reeuwijk.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'4x per jaar.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Kaag en Braassem', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Medium', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Kaag en Braassem.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'4x per jaar + vooroverleg.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Nieuwkoop', domein:'Netwerk', type:'Extern', frequentie:'Ad hoc', prioriteit:'Laag', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Nieuwkoop.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'Frequentie niet vermeld.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Krimpenerwaard', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Laag', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Krimpenerwaard. Vaste onderwerpen + aangiften burgemeester.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'2x per jaar.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Waddinxveen', domein:'Netwerk', type:'Extern', frequentie:'Wisselend', prioriteit:'Laag', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Waddinxveen.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'2x per jaar.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Driehoek Zuidplas', domein:'Netwerk', type:'Extern', frequentie:'Ad hoc', prioriteit:'Laag', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Driehoeksoverleg gemeente Zuidplas. Vaste onderwerpen + demos.', deelnemers:'Burgemeester, politie, OvJ/adviseur', standVanZaken:'Frequentie niet vermeld.', actiesNodig:'', toelichting:'', toets:{} },
+      // Districtscolleges
+      { naam:'Districtscollege F', domein:'Overleg', type:'Extern', frequentie:'Kwartaal', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['Districtscollege G'], doel:'Districtscollege voor district F. Inclusief voorbereiding.', deelnemers:'Districtsleden F', standVanZaken:'4x per jaar + voorbereiding.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Districtscollege G', domein:'Overleg', type:'Extern', frequentie:'Kwartaal', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['Districtscollege F'], doel:'Districtscollege voor district G. Inclusief voorbereiding.', deelnemers:'Districtsleden G', standVanZaken:'4x per jaar + voorbereiding.', actiesNodig:'', toelichting:'', toets:{} },
+      // RIEC
+      { naam:'RIEC OMT District F', domein:'Overleg', type:'Beide', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['RIEC OMT District G','RIEC Casusoverleg/HHK'], doel:'Ondermijningstafeloverleg RIEC voor district F. Inclusief voorbereiding.', deelnemers:'RIEC-deelnemers F', standVanZaken:'8x per jaar + voorbereiding.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'RIEC OMT District G', domein:'Overleg', type:'Beide', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['RIEC OMT District F','RIEC Casusoverleg/HHK'], doel:'Ondermijningstafeloverleg RIEC voor district G. Inclusief voorbereiding.', deelnemers:'RIEC-deelnemers G', standVanZaken:'8x per jaar + voorbereiding.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'RIEC Casusoverleg / HHK', domein:'Overleg', type:'Beide', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'Gebiedsadviseur F/G', relaties:['RIEC OMT District F','RIEC OMT District G'], doel:'Casusgericht overleg en handhavingsknelpunten.', deelnemers:'RIEC-deelnemers', standVanZaken:'Frequentie ad hoc.', actiesNodig:'', toelichting:'', toets:{} },
+      // CTER
+      { naam:'CTER Leiden', domein:'Overleg', type:'Beide', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['CTER Gouda','CTER Alphen aan den Rijn','Landelijk overleg terrorisme','Regionaal overleg terrorisme'], doel:'Contra-terrorisme afstemmings- en casusoverleg Leiden. 3x afstemmingsoverleg + 3x casusoverleg.', deelnemers:'CT-partners Leiden', standVanZaken:'Loopt.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'CTER Gouda', domein:'Overleg', type:'Beide', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['CTER Leiden','CTER Alphen aan den Rijn'], doel:'Contra-terrorisme afstemmings- en casusoverleg Gouda.', deelnemers:'CT-partners Gouda', standVanZaken:'Loopt.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'CTER Alphen aan den Rijn', domein:'Overleg', type:'Beide', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['CTER Leiden','CTER Gouda'], doel:'Contra-terrorisme afstemmings- en casusoverleg Alphen aan den Rijn.', deelnemers:'CT-partners Alphen', standVanZaken:'Loopt.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Landelijk overleg terrorisme', domein:'Netwerk', type:'Extern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['Regionaal overleg terrorisme'], doel:'Landelijk CT-overleg.', deelnemers:'Landelijke CT-partners', standVanZaken:'Loopt.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Regionaal overleg terrorisme', domein:'Netwerk', type:'Extern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['Landelijk overleg terrorisme'], doel:'Regionaal CT-overleg.', deelnemers:'Regionale CT-partners', standVanZaken:'Loopt.', actiesNodig:'', toelichting:'', toets:{} },
+      // Sturing opsporing
+      { naam:'Dossen District F', domein:'Inhoudelijk dossier', type:'Intern', frequentie:'Wisselend', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['Sturingsoverleg/ZMP F'], doel:'Dossieroverleg district F.', deelnemers:'Districtscollega\'s F', standVanZaken:'4-wekelijks.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Dossen District G', domein:'Inhoudelijk dossier', type:'Intern', frequentie:'Ad hoc', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['Sturingsoverleg/ZMP G'], doel:'Dossieroverleg district G.', deelnemers:'Districtscollega\'s G', standVanZaken:'Nieuwe reeks in te plannen.', actiesNodig:'Nieuwe reeks inplannen', toelichting:'', toets:{} },
+      { naam:'Sturingsoverleg/ZMP District F', domein:'Overleg', type:'Beide', frequentie:'Tweewekelijks', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['Dossen District F'], doel:'Tweewekelijks sturingsoverleg en ZMP-overleg district F. 1 tot 1,5 uur per sessie.', deelnemers:'F en politie district F', standVanZaken:'Iedere twee weken.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Sturingsoverleg/ZMP District G', domein:'Overleg', type:'Beide', frequentie:'Tweewekelijks', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:['Dossen District G'], doel:'Tweewekelijks sturingsoverleg en ZMP-overleg district G. 1 tot 1,5 uur per sessie.', deelnemers:'OM en politie district G', standVanZaken:'Iedere twee weken.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Intern instroom/ZMP districtscollega\'s', domein:'Overleg', type:'Intern', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Intern overleg met districtscollega\'s over instroom, ZMP\'s en knelpunten.', deelnemers:'Districtscollega\'s', standVanZaken:'Loopt naast al het andere.', actiesNodig:'', toelichting:'', toets:{} },
+      // Intern gebiedscluster
+      { naam:'Overleg met HOvJ', domein:'Team & HR', type:'Intern', frequentie:'Ad hoc', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Afstemming met hoofdofficier over gebiedsdossiers.', deelnemers:'HOvJ', standVanZaken:'Loopt.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Gebiedsoverleg (intern)', domein:'Team & HR', type:'Intern', frequentie:'Wekelijks', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Wekelijks intern overleg gebiedscluster.', deelnemers:'Gebiedscluster', standVanZaken:'Loopt.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'IDO (intern gebiedscluster)', domein:'Overleg', type:'Intern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'IDO vanuit gebiedsclusterperspectief.', deelnemers:'Gebiedscluster + districtsmensen', standVanZaken:'Loopt.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Intern afstemoverleg SDH/GRS/gebiedswerk', domein:'Overleg', type:'Intern', frequentie:'Maandelijks', prioriteit:'Hoog', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Intern afstemoverleg SDH, GRS en gebiedswerk. Gebiedsadviseur doet voorbereiding én zit voor.', deelnemers:'SDH, GRS, gebiedswerk', standVanZaken:'Voorzitter + voorbereiding bij één persoon.', actiesNodig:'Voorzitterschap en voorbereiding splitsen', toelichting:'', toets:{} },
+      { naam:'Afdelingsoverleg (gebiedscluster)', domein:'Team & HR', type:'Intern', frequentie:'Wisselend', prioriteit:'Medium', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Afdelingsoverleg vanuit gebiedsclustersdeelname.', deelnemers:'Hele afdeling', standVanZaken:'Loopt.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'Beleidsoverleg (gebiedscluster)', domein:'Overleg', type:'Intern', frequentie:'Maandelijks', prioriteit:'Medium', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Beleidsoverleg vanuit gebiedsclustersdeelname.', deelnemers:'Beleidscluster + gebied', standVanZaken:'Loopt.', actiesNodig:'', toelichting:'', toets:{} },
+      { naam:'7e en 9e overleg', domein:'Overleg', type:'Intern', frequentie:'Ad hoc', prioriteit:'Medium', eigenaar:'Gebiedsadviseur F/G', relaties:[], doel:'Overleg 7e en 9e richtlijn of soortgelijk.', deelnemers:'Betrokkenen', standVanZaken:'Loopt.', actiesNodig:'', toelichting:'', toets:{} },
+    ].map(o => ({ ...o, id: Math.random().toString(36).slice(2,10) }));
+
     const TOETS_VRAGEN = [
       { id:'resultaat', label:'Levert dit overleg een concreet resultaat op?' },
       { id:'eigenaar',  label:'Is er een eigenaar die zich er echt aan committeert?' },
       { id:'gemist',    label:'Zou het parket iets missen als dit overleg wegvalt?' },
     ];
 
-    function OverleggenView({ overleggen, onOverleggenChange, apiKey }) {
+    function OverleggenView({ overleggen, onOverleggenChange, overleggenGC, onOverleggenGCChange, apiKey }) {
+      const [hoofdTab, setHoofdTab] = useState('afdeling');
+
+      if (hoofdTab === 'gc') {
+        return (
+          <div>
+            <div style={{ display:'flex', gap:8, marginBottom:20 }}>
+              <button onClick={() => setHoofdTab('afdeling')}
+                style={{ ...S.btnS, background:'transparent', color:C.navy }}>← B&S Afdeling</button>
+              <button style={{ ...S.btnP }}>Gebiedscluster</button>
+            </div>
+            <OverlegSubView
+              overleggen={overleggenGC}
+              onOverleggenChange={onOverleggenGCChange}
+              startData={START_OVERLEGGEN_GC}
+              apiKey={apiKey}
+              analyseContext="Dit zijn de overleggen van één gebiedsadviseur in de districten F en G bij OM Parket Den Haag. Analyseer het werkpakket van één persoon."
+              analyseVragen="1. Wat is de totale overlegdruk voor één persoon — maak een ruwe schatting van het aantal overleguren per jaar?\n2. Welke overleggen vragen representatie zonder strategische meerwaarde voor B&S?\n3. Waar zit de rol van de gebiedsadviseur als inhoudelijk adviseur versus als overlegcoördinator/secretaris?\n4. Welke overleggen zouden door iemand anders gevoerd kunnen worden (OvJ, politie, gemeente zelf)?\n5. Wat ontbreekt in dit werkpakket — welke taken zouden er juist wél in moeten zitten als B&S strategisch wil opereren?\n6. Wat zegt dit werkpakket over hoe de afdeling momenteel functioneert — en wat moet er veranderen?"
+            />
+          </div>
+        );
+      }
+
+      return (
+        <div>
+          <div style={{ display:'flex', gap:8, marginBottom:20 }}>
+            <button style={{ ...S.btnP }}>B&S Afdeling</button>
+            <button onClick={() => setHoofdTab('gc')}
+              style={{ ...S.btnS, color:C.navy }}>Gebiedscluster →</button>
+          </div>
+          <OverlegSubView
+            overleggen={overleggen}
+            onOverleggenChange={onOverleggenChange}
+            startData={START_OVERLEGGEN}
+            apiKey={apiKey}
+            analyseContext="Dit is de overlegstructuur van afdeling B&S bij OM Parket Den Haag als geheel."
+            analyseVragen="1. Welke overleggen staan centraal — veel verbindingen, hoog risico als ze wegvallen?\n2. Welke overleggen zijn geïsoleerd — mogelijk overbodig?\n3. Waar lopen intern en extern door elkaar — rolvervaging?\n4. Welke overleggen bedienen hetzelfde doel maar zijn apart georganiseerd?\n5. Wat ontbreekt gezien de diagnosebevindingen over B&S?\n6. Welke overleggen hebben geen eigenaar of onduidelijk eigenaarschap?"
+          />
+        </div>
+      );
+    }
+
+    function OverlegSubView({ overleggen, onOverleggenChange, startData, apiKey, analyseContext, analyseVragen }) {
       const [tab, setTab] = useState('inventaris');
       const [netwerkTab, setNetwerkTab] = useState('graph');
       const [editing, setEditing] = useState(null);
@@ -1432,8 +1526,8 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
           return `${o.naam} | ${o.type} | ${o.frequentie} | Prio: ${o.prioriteit} | Eigenaar: ${o.eigenaar || '?'} | Relaties: ${o.relaties.join(', ')||'geen'} | Toetsing: ${t||'niet gedaan'}`;
         }).join('\n');
         try {
-          const result = await claude([{ role:'user', content:`Analyseer de overlegstructuur van afdeling B&S bij OM Parket Den Haag:\n\n${tekst}\n\nBeantwoord:\n1. Welke overleggen staan centraal — veel verbindingen, hoog risico als ze wegvallen?\n2. Welke overleggen zijn geïsoleerd — mogelijk overbodig?\n3. Waar lopen intern en extern door elkaar — rolvervaging?\n4. Welke overleggen bedienen hetzelfde doel maar zijn apart georganiseerd?\n5. Wat ontbreekt gezien de diagnosebevindingen over B&S?\n6. Welke overleggen hebben geen eigenaar of onduidelijk eigenaarschap?\n\nAnalytisch, direct, geen ambtelijke taal.` }],
-            `Je analyseert de overlegstructuur van afdeling B&S bij OM Parket Den Haag. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal. De afdeling heeft vijf clusters: beleidsondersteuning & advies, gebiedsgericht werken, intelligence & ondermijning, communicatie, en bureau juridische zaken.`,
+          const result = await claude([{ role:'user', content:`${analyseContext}\n\nOverzicht:\n${tekst}\n\n${analyseVragen}\n\nAnalytisch, direct, geen ambtelijke taal.` }],
+            `Je analyseert de overlegstructuur van afdeling B&S bij OM Parket Den Haag. Schrijf in het Nederlands. Analytisch, direct, geen ambtelijke taal.`,
             apiKey);
           setAiText(result);
         } catch(e) { setAiErr(e.message); }
@@ -1443,19 +1537,16 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
       return (
         <div>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:20 }}>
-            <div>
-              <div style={S.secTitle}>Overleggen</div>
-              <div style={{ fontSize:13, color:C.mid }}>{overleggen.length} overleggen</div>
-            </div>
+            <div style={{ fontSize:13, color:C.mid }}>{overleggen.length} overleggen</div>
             <div style={{ display:'flex', gap:8 }}>
               <button style={S.btnS} onClick={() => {
                 const bestaandeNamen = overleggen.map(o => o.naam.toLowerCase().trim());
-                const toe = START_OVERLEGGEN.filter(s => !bestaandeNamen.includes(s.naam.toLowerCase().trim()));
-                if (toe.length === 0) { alert('Alle overleggen uit de overdracht staan er al in.'); return; }
-                if (window.confirm(`${toe.length} ontbrekende overleggen toevoegen uit de overdracht van Lodewijk?`)) {
+                const toe = startData.filter(s => !bestaandeNamen.includes(s.naam.toLowerCase().trim()));
+                if (toe.length === 0) { alert('Alle overleggen staan er al in.'); return; }
+                if (window.confirm(`${toe.length} ontbrekende overleggen toevoegen?`)) {
                   onOverleggenChange([...overleggen, ...toe.map(o => ({ ...o, id: uid() }))]);
                 }
-              }}>+ Laad uit overdracht</button>
+              }}>+ Laad startdata</button>
               <button style={S.btnP} onClick={addOverleg}>+ Nieuw overleg</button>
             </div>
           </div>
@@ -2119,7 +2210,7 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
       const save = () => { onSaveKey(key); setSaved(true); setTimeout(() => setSaved(false), 2000); };
 
       const exportData = () => {
-        const data = { versie: 1, datum: new Date().toISOString(), gesprekken, bronnen, overleggen };
+        const data = { versie: 1, datum: new Date().toISOString(), gesprekken, bronnen, overleggen, overleggenGC };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -2198,16 +2289,19 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
       const [gesprekken, setGesprekken] = useState(() => store.loadGesprekken());
       const [bronnen, setBronnen] = useState(() => store.loadContext());
       const [overleggen, setOverleggen] = useState(() => store.loadOverleggen() || START_OVERLEGGEN);
+      const [overleggenGC, setOverleggenGC] = useState(() => store.loadOverleggenGC() || START_OVERLEGGEN_GC);
       const [editingId, setEditingId] = useState(null);
 
       useEffect(() => { store.saveGesprekken(gesprekken); }, [gesprekken]);
       useEffect(() => { store.saveContext(bronnen); }, [bronnen]);
       useEffect(() => { store.saveOverleggen(overleggen); }, [overleggen]);
+      useEffect(() => { store.saveOverleggenGC(overleggenGC); }, [overleggenGC]);
 
       const handleImport = useCallback((data) => {
         setGesprekken(data.gesprekken || []);
         setBronnen(data.bronnen || []);
         if (data.overleggen) setOverleggen(data.overleggen);
+        if (data.overleggenGC) setOverleggenGC(data.overleggenGC);
       }, []);
 
       const handleSaveKey = (k) => { store.setApiKey(k); setApiKeyState(k); setShowSetup(false); };
@@ -2254,7 +2348,7 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
             {view==='form' && <FormView gesprek={editingId ? gesprekken.find(g=>g.id===editingId) : null} onSave={handleSave} onCancel={() => { setEditingId(null); setView('gesprekken'); }} />}
             {view==='patronen' && <PatronenView gesprekken={gesprekken} apiKey={apiKey} />}
             {view==='diagnose' && <DiagnoseView gesprekken={gesprekken} bronnen={bronnen} onBronnenChange={setBronnen} apiKey={apiKey} />}
-            {view==='overleggen' && <OverleggenView overleggen={overleggen} onOverleggenChange={setOverleggen} apiKey={apiKey} />}
+            {view==='overleggen' && <OverleggenView overleggen={overleggen} onOverleggenChange={setOverleggen} overleggenGC={overleggenGC} onOverleggenGCChange={setOverleggenGC} apiKey={apiKey} />}
             {view==='notitie' && <NotitieView gesprekken={gesprekken} apiKey={apiKey} />}
             {view==='instellingen' && <InstellingenView apiKey={apiKey} onSaveKey={handleSaveKey} gesprekken={gesprekken} bronnen={bronnen} overleggen={overleggen} onImport={handleImport} />}
           </main>
