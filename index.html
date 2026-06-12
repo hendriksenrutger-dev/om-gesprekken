@@ -2200,7 +2200,7 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
     }
 
     // ─── INSTELLINGEN ─────────────────────────────────────────────────────────
-    function InstellingenView({ apiKey, onSaveKey, gesprekken, bronnen, overleggen, onImport }) {
+    function InstellingenView({ apiKey, onSaveKey, gesprekken, bronnen, overleggen, overleggenGC, onImport }) {
       const [key, setKey] = useState(apiKey);
       const [saved, setSaved] = useState(false);
       const [importErr, setImportErr] = useState('');
@@ -2350,7 +2350,7 @@ Geen actiepunten. Geen stappenplannen. Alleen bevindingen.`;
             {view==='diagnose' && <DiagnoseView gesprekken={gesprekken} bronnen={bronnen} onBronnenChange={setBronnen} apiKey={apiKey} />}
             {view==='overleggen' && <OverleggenView overleggen={overleggen} onOverleggenChange={setOverleggen} overleggenGC={overleggenGC} onOverleggenGCChange={setOverleggenGC} apiKey={apiKey} />}
             {view==='notitie' && <NotitieView gesprekken={gesprekken} apiKey={apiKey} />}
-            {view==='instellingen' && <InstellingenView apiKey={apiKey} onSaveKey={handleSaveKey} gesprekken={gesprekken} bronnen={bronnen} overleggen={overleggen} onImport={handleImport} />}
+            {view==='instellingen' && <InstellingenView apiKey={apiKey} onSaveKey={handleSaveKey} gesprekken={gesprekken} bronnen={bronnen} overleggen={overleggen} overleggenGC={overleggenGC} onImport={handleImport} />}
           </main>
         </div>
       );
